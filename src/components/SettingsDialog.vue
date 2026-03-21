@@ -150,16 +150,6 @@ function getCurrentGetKeyUrl() {
   return channel?.getApiKeyUrl || ''
 }
 
-// 打开获取 Key 页面
-function goToGetKey() {
-  const url = getCurrentGetKeyUrl()
-  if (url) {
-    window.open(url, '_blank')
-  } else {
-    message.warning('该渠道未配置获取 Key 链接')
-  }
-}
-
 // Stage-specific models - 各环节模型配置
 const localStageModels = ref({
   architecture: '',
@@ -239,9 +229,6 @@ async function testConnection() {
   }
 }
 
-function goToGetKey() {
-  window.open('https://api.chatfire.site/login?inviteCode=EEE80324', '_blank')
-}
 </script>
 
 <template>
@@ -364,7 +351,7 @@ function goToGetKey() {
     <template #footer>
       <div class="flex justify-between">
         <n-space>
-          <n-button @click="goToGetKey" tertiary>
+          <n-button @click="() => { const url = getCurrentGetKeyUrl(); if(url) window.open(url, '_blank'); else message.warning('该渠道未配置获取 Key 链接') }" tertiary>
             获取 Key
           </n-button>
           <n-button @click="testConnection" tertiary>
