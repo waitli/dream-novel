@@ -17,7 +17,11 @@ export const useSettingsStore = defineStore('settings', () => {
     model: DEFAULT_MODEL,
     temperature: 0.7,
     maxTokens: 8192,
-    timeout: 600
+    timeout: 600,
+    // Azure 配置
+    resourceName: '',
+    deploymentId: '',
+    apiVersion: '2024-02-15-preview'
   })))
 
   // Stage-specific model configs - 各环节模型配置
@@ -61,6 +65,12 @@ export const useSettingsStore = defineStore('settings', () => {
     localStorage.setItem('api_config', JSON.stringify(apiConfig.value))
   }
 
+  // Update Azure config - 更新 Azure 配置
+  function updateAzureConfig(azureConfig) {
+    apiConfig.value = { ...apiConfig.value, ...azureConfig }
+    localStorage.setItem('api_config', JSON.stringify(apiConfig.value))
+  }
+
   // Update stage models - 更新环节模型配置
   function updateStageModels(models) {
     stageModels.value = { ...stageModels.value, ...models }
@@ -73,6 +83,7 @@ export const useSettingsStore = defineStore('settings', () => {
     stageModels,
     toggleDark,
     updateApiConfig,
+    updateAzureConfig,
     updateStageModels,
     getStageConfig
   }

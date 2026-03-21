@@ -21,27 +21,83 @@ const channels = [
     name: 'Chatfire',
     baseUrl: 'https://api.chatfire.site/v1',
     models: [
-      // 'gpt-4o',
-      // 'claude-sonnet-4-5-20250929',
-      // 'kimi-k2-thinking',
       'gemini-3-flash-preview',
       'doubao-seed-1-8-251228',
       'gemini-3-pro-preview',
-      // 'gemini-2.5-pro'
-    ]
+      'gpt-4o',
+      'claude-sonnet-4-5-20250929',
+      'kimi-k2-thinking'
+    ],
+    getApiKeyUrl: 'https://api.chatfire.site/login?inviteCode=EEE80324'
   },
-  // { 
-  //   id: 'openai', 
-  //   name: 'OpenAI',
-  //   baseUrl: 'https://api.openai.com/v1',
-  //   models: ['gpt-5.2', 'gpt-4o', 'gpt-4o-mini']
-  // },
-  // { 
-  //   id: 'gemini', 
-  //   name: 'Google Gemini',
-  //   baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-  //   models: ['gemini-2.5-pro', 'gemini-3-pro-preview']
-  // }
+  { 
+    id: 'openai', 
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'],
+    getApiKeyUrl: 'https://platform.openai.com/api-keys'
+  },
+  { 
+    id: 'gemini', 
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    models: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+    getApiKeyUrl: 'https://aistudio.google.com/app/apikey'
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic Claude',
+    baseUrl: 'https://api.anthropic.com/v1',
+    models: ['claude-sonnet-4-5-20250929', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
+    getApiKeyUrl: 'https://console.anthropic.com/settings/keys',
+    // Claude 需要特殊处理
+    isClaude: true
+  },
+  {
+    id: 'azure',
+    name: 'Azure OpenAI',
+    baseUrl: 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}',
+    models: ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
+    getApiKeyUrl: 'https://portal.azure.com/',
+    // Azure 需要特殊处理
+    isAzure: true
+  },
+  {
+    id: 'moonshot',
+    name: '月之暗面 Kimi',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+    getApiKeyUrl: 'https://platform.moonshot.cn/console/api-keys'
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek 深度求索',
+    baseUrl: 'https://api.deepseek.com/v1',
+    models: ['deepseek-chat', 'deepseek-coder'],
+    getApiKeyUrl: 'https://platform.deepseek.com/api_keys'
+  },
+  {
+    id: 'baichuan',
+    name: '百川智能',
+    baseUrl: 'https://api.baichuan-ai.com/v1',
+    models: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan2-Turbo'],
+    getApiKeyUrl: 'https://platform.baichuan-ai.com/console/apikey'
+  },
+  {
+    id: 'zhipu',
+    name: '智谱 AI',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-4', 'glm-4-air', 'glm-3-turbo'],
+    getApiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
+  },
+  {
+    id: 'custom',
+    name: '自定义 API',
+    baseUrl: '',
+    models: [],
+    getApiKeyUrl: '',
+    isCustom: true
+  }
 ]
 
 // Current channel - 当前渠道
@@ -68,14 +124,39 @@ const localConfig = ref({
   timeout: 600
 })
 
+// Azure 配置（单独存储）
+const azureConfig = ref({
+  resourceName: '',
+  deploymentId: '',
+  apiVersion: '2024-02-15-preview'
+})
+
 // Handle channel change - 处理渠道切换
 function handleChannelChange(channelId) {
   currentChannel.value = channelId
   const channel = channels.find(c => c.id === channelId)
   if (channel) {
     localConfig.value.channel = channelId
-    localConfig.value.baseUrl = channel.baseUrl
+    if (!channel.isCustom) {
+      localConfig.value.baseUrl = channel.baseUrl
+    }
     localConfig.value.model = channel.models[0] || ''
+  }
+}
+
+// 获取当前渠道的获取 Key 链接
+function getCurrentGetKeyUrl() {
+  const channel = channels.find(c => c.id === currentChannel.value)
+  return channel?.getApiKeyUrl || ''
+}
+
+// 打开获取 Key 页面
+function goToGetKey() {
+  const url = getCurrentGetKeyUrl()
+  if (url) {
+    window.open(url, '_blank')
+  } else {
+    message.warning('该渠道未配置获取 Key 链接')
   }
 }
 
@@ -112,7 +193,23 @@ function saveSettings() {
     message.warning('请输入 API Key')
     return
   }
-  settings.updateApiConfig(localConfig.value)
+  
+  // Azure 特殊处理
+  if (currentChannel.value === 'azure') {
+    if (!azureConfig.value.resourceName || !azureConfig.value.deploymentId) {
+      message.warning('请填写 Azure Resource Name 和 Deployment ID')
+      return
+    }
+    // 构建 Azure URL
+    localConfig.value.baseUrl = `https://${azureConfig.value.resourceName}.openai.azure.com/openai/deployments/${azureConfig.value.deploymentId}`
+    settings.updateAzureConfig({
+      ...localConfig.value,
+      ...azureConfig.value
+    })
+  } else {
+    settings.updateApiConfig(localConfig.value)
+  }
+  
   settings.updateStageModels(localStageModels.value)
   message.success('设置已保存')
   emit('update:modelValue', false)
@@ -169,12 +266,38 @@ function goToGetKey() {
       </n-form-item>
 
       <!-- API Base URL -->
-      <n-form-item label="API Base URL">
+      <n-form-item 
+        v-if="currentChannel !== 'azure'"
+        label="API Base URL"
+      >
         <n-input 
           v-model:value="localConfig.baseUrl" 
-          placeholder="https://api.chatfire.site/v1"
+          :placeholder="currentChannel === 'custom' ? '请输入 API Base URL' : channels.find(c => c.id === currentChannel)?.baseUrl"
+          :disabled="currentChannel !== 'custom'"
         />
       </n-form-item>
+
+      <!-- Azure 特殊配置 -->
+      <template v-if="currentChannel === 'azure'">
+        <n-form-item label="Resource Name">
+          <n-input 
+            v-model:value="azureConfig.resourceName" 
+            placeholder="你的 Azure OpenAI 资源名"
+          />
+        </n-form-item>
+        <n-form-item label="Deployment ID">
+          <n-input 
+            v-model:value="azureConfig.deploymentId" 
+            placeholder="部署 ID"
+          />
+        </n-form-item>
+        <n-form-item label="API Version">
+          <n-input 
+            v-model:value="azureConfig.apiVersion" 
+            placeholder="2024-02-15-preview"
+          />
+        </n-form-item>
+      </template>
 
       <!-- API Key -->
       <n-form-item label="API Key">
@@ -244,12 +367,12 @@ function goToGetKey() {
           <n-button @click="goToGetKey" tertiary>
             获取 Key
           </n-button>
-          <!-- <n-button @click="testConnection" tertiary>
+          <n-button @click="testConnection" tertiary>
             <template #icon>
               <n-icon><FlashOutline /></n-icon>
             </template>
             测试连接
-          </n-button> -->
+          </n-button>
         </n-space>
         <n-space>
           <n-button @click="emit('update:modelValue', false)">取消</n-button>
