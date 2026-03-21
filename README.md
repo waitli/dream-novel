@@ -1,6 +1,6 @@
 # AI 小说生成器
-[体验地址](https://marketing.chatfire.site/huobao-novel/)
-一个基于雪花写作法的 AI 小说创作工具，支持智能生成小说架构、角色体系、世界观和章节内容。
+[体验地址](https://novel.waitli.top/)
+一个基于雪花写作法的 AI 小说创作工具，支持智能生成小说架构、角色体系、世界观和章节内容。基于huobao-novel，我fork和修改的原因：第一部署到cloudflare，还有就是我自己在使用中会有一些问题要修改，不过再次鸣谢@[huobao-novel](https://github.com/chatfire-AI/huobao-novel)
 
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
@@ -64,7 +64,7 @@ npm run build
 2. 填入 API Base URL 和 API Key
 3. 选择需要使用的模型
 
-支持 OpenAI 兼容的 API 接口。
+添加了多种支持支持 OpenAI 兼容的 API 接口。
 
 ## 📝 创作流程
 
