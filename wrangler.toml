@@ -4,21 +4,10 @@
 name = "dream-novel"
 compatibility_date = "2024-01-01"
 
-# Pages 构建配置
 [build]
 command = "npm run build"
 publish_dir = "dist"
 
-# 环境变量（在 Cloudflare Dashboard 中设置更安全）
-# 或者使用 wrangler secret put API_KEY
+# 环境变量（非敏感配置，敏感信息在 Dashboard 设置）
 [vars]
-# 这里可以放非敏感配置
 APP_NAME = "AI 小说生成器"
-
-# 生产环境配置
-[env.production]
-name = "dream-novel-production"
-
-# 预览环境配置
-[env.preview]
-name = "dream-novel-preview"
