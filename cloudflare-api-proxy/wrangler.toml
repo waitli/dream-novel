@@ -1,0 +1,16 @@
+# Cloudflare Workers - API 代理配置
+name = "dream-novel-api-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# 环境变量（使用 wrangler secret put 设置敏感信息）
+# wrangler secret put API_KEY
+# wrangler secret put API_BASE_URL
+
+# 生产环境
+[env.production]
+name = "dream-novel-api-proxy-prod"
+
+# 速率限制（可选）
+[limits]
+cpu_ms = 50000  # 50 秒 CPU 时间
