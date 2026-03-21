@@ -4,7 +4,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/huobao-novel/',
+  base: '/', // 自定义域名使用根路径
   plugins: [vue()],
   server: {
     host: '0.0.0.0',

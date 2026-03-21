@@ -14,7 +14,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory("/huobao-novel"),
+  history: createWebHistory("/"), // 自定义域名使用根路径
   routes
 })
 
