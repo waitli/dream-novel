@@ -1,15 +1,15 @@
 import { chatCompletion, cleanResponse } from './llm'
 import { architecturePrompts, chapterPrompts, utilityPrompts } from '../prompts'
-// 可选：使用优化版 prompts（取消注释启用）
-// import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
-// import { utilityPrompts as utilityPromptsOptimized } from '../prompts/utility-optimized'
+// 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
+import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
+import { utilityPrompts as utilityPromptsOptimized } from '../prompts/utility-optimized'
 
 // 解构提示词
 const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, worldBuilding: worldBuildingPrompt, plotArchitecture: plotArchitecturePrompt, characterState: createCharacterStatePrompt } = architecturePrompts
 
-// 使用优化版 prompts（如果导入）
-const chapterPromptsToUse = chapterPromptsOptimized || chapterPrompts
-const utilityPromptsToUse = utilityPromptsOptimized || utilityPrompts
+// 使用优化版 prompts
+const chapterPromptsToUse = chapterPromptsOptimized
+const utilityPromptsToUse = utilityPromptsOptimized
 
 const { blueprint: chapterBlueprintPrompt, blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
 const { summary: summaryPrompt, updateCharacterState: updateCharacterStatePrompt, trackForeshadowing: trackForeshadowingPrompt } = utilityPromptsToUse
