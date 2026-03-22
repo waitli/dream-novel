@@ -2,7 +2,48 @@
 
 **仓库**: https://github.com/waitli/dream-novel  
 **分支**: main  
-**最新提交**: `1736ac2` (2026-03-22 11:52 GMT+8)
+**最新提交**: `43608d9` (2026-03-22 13:56 GMT+8)
+
+---
+
+## 🔧 优化修复（2026-03-22 13:56）
+
+### 问题：章节大纲分块过大导致生成失败
+
+**现象**：
+- 之前每批生成 30 章大纲
+- 100 章只生成 79 章，失败率较高
+
+**根本原因**：
+- 每批 30 章大纲，按每章 100-150 字计算，需要 3000-4500 字
+- 加上 prompt 本身和已有大纲上下文，接近 token 限制
+- AI 可能因为 token 耗尽而提前停止生成
+
+**修复方案**：
+- 限制每批最大生成 **20 章** 大纲
+- 减少每批的 token 消耗，降低生成失败概率
+
+**修改内容**：
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/api/generator.js` | 限制 chunkSize 最大为 20 章/批 |
+
+**技术细节**：
+```javascript
+// 原公式
+chunkSize = Math.floor(8192/200/10)*10-10 = 30 章
+
+// 新限制
+chunkSize = Math.max(1, Math.min(chunkSize, 20, numberOfChapters))
+// = 20 章/批
+```
+
+**影响**：
+- 100 章分块：4 批（30+30+30+10）→ **5 批（20+20+20+20+20）**
+- 每批 token 消耗减少约 33%
+- 虽然批次数增加，但每批成功率更高
+- 总体生成时间可能增加 1-2 分钟，但更稳定
 
 ---
 
@@ -187,6 +228,7 @@ if (finalCount < numberOfChapters) {
 4. **时间线清晰**：新增时间线模块，避免时间逻辑错误
 5. **阵营关系明确**：新增阵营关系模块，适合多势力斗争题材
 6. **大纲完整性保证**：新增验证和重试机制，确保生成完整数量
+7. **分块优化**：20 章/批，减少 token 耗尽风险
 
 ### ⚠️ 潜在问题
 
@@ -201,6 +243,7 @@ if (finalCount < numberOfChapters) {
 
 3. **生成时间增加**：
    - 更多字数 = 更长生成时间
+   - 分块更多（20 章/批）= 更多 API 调用
    - 建议：考虑分批次更新（如每 5 章更新一次完整摘要）
 
 ---
@@ -232,7 +275,7 @@ const utilityPromptsToUse = utilityPromptsOptimized
 /home/admin/openclaw/workspace/temp/dream-novel-push/
 ├── src/
 │   ├── api/
-│   │   └── generator.js          # 添加验证和重试机制 ✅
+│   │   └── generator.js          # 添加验证和重试机制 + 20 章/批限制 ✅
 │   └── prompts/
 │       ├── chapter-optimized.js  ← 已修改（大纲 + 强制要求）✅
 │       ├── chapter.js             # 基础版（未修改）
@@ -266,8 +309,9 @@ const utilityPromptsToUse = utilityPromptsOptimized
    - 分析瓶颈，针对性优化
 
 5. **chunkSize 优化**：
-   - 当前公式：`Math.floor(maxTokens / 200 / 10) * 10 - 10`
-   - 如果频繁生成不完整，可以减小 chunkSize（如每块 20 章而非 30 章）
+   - 当前限制：20 章/批
+   - 如果仍然生成不完整，可以进一步降低到 15 章/批
+   - 如果很稳定，可以尝试提高到 25 章/批
 
 ---
 
@@ -275,6 +319,8 @@ const utilityPromptsToUse = utilityPromptsOptimized
 
 | 日期 | 提交哈希 | 修改内容 | 修改者 |
 |------|---------|---------|--------|
+| 2026-03-22 13:56 | `43608d9` | fix: 降低章节大纲分块大小（30 章→20 章/批） | Halcyon |
+| 2026-03-22 11:52 | `e7f2a57` | docs: 更新修改记录，添加大纲生成不完整问题的修复说明 | Halcyon |
 | 2026-03-22 11:52 | `1736ac2` | chore: 删除临时文件 generator-fixed.js | Halcyon |
 | 2026-03-22 11:52 | `b94dbf5` | fix: 修复章节大纲生成不完整问题（100 章只生成 79 章） | Halcyon |
 | 2026-03-22 11:10 | `8ca5c35` | docs: 添加修改记录文档 (MODIFICATION_HISTORY.md) | Halcyon |
@@ -288,12 +334,12 @@ const utilityPromptsToUse = utilityPromptsOptimized
 ## 🔗 相关链接
 
 - **GitHub 仓库**: https://github.com/waitli/dream-novel
-- **最新提交**: https://github.com/waitli/dream-novel/commit/1736ac2
+- **最新提交**: https://github.com/waitli/dream-novel/commit/43608d9
 - **修改记录**: https://github.com/waitli/dream-novel/blob/main/MODIFICATION_HISTORY.md
 - **分析报告**: https://github.com/waitli/dream-novel/blob/main/ANALYSIS_REPORT.md
 - **体验地址**: https://novel.waitli.top/
 
 ---
 
-**文档更新时间**: 2026-03-22 11:52  
+**文档更新时间**: 2026-03-22 13:56  
 **维护者**: Halcyon
