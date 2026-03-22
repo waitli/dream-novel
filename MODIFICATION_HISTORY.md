@@ -2,11 +2,72 @@
 
 **仓库**: https://github.com/waitli/dream-novel  
 **分支**: main  
-**最新提交**: `0a75dac` (2026-03-22 10:08 GMT+8)
+**最新提交**: `1736ac2` (2026-03-22 11:52 GMT+8)
 
 ---
 
-## 📝 本次修改（2026-03-22）
+## 🔧 紧急修复（2026-03-22 11:52）
+
+### 问题：章节大纲生成不完整
+
+**现象**：计划生成 100 章大纲，实际只生成 79 章
+
+**根本原因**：
+1. 分块生成时没有验证每块实际生成的章节数量
+2. AI 可能因为 token 限制或其他原因提前停止生成
+3. 没有重试机制来补救生成失败的情况
+
+**修复内容**：
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/api/generator.js` | 添加章节数量验证和重试机制 |
+| `src/prompts/chapter-optimized.js` | 强化 prompt，明确要求必须生成完整数量 |
+
+**技术细节**：
+- 使用正则 `/第\s*\d+\s*章/g` 统计章节数量
+- 每块生成后验证：`actualCount < expectedCount` → 重试
+- 重试时比较 `retryCount > actualCount` 才采用新结果
+- 最终验证总章节数，显示警告信息
+
+**generator.js 新增逻辑**：
+```javascript
+// 验证本块生成的章节数量
+const actualCount = (chunkResult.match(/第\s*\d+\s*章/g) || []).length
+if (actualCount < expectedCount) {
+  console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
+  // 尝试重试一次
+  const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
+  const retryCount = (retryResult.match(/第\s*\d+\s*章/g) || []).length
+  if (retryCount > actualCount) {
+    blueprint = blueprint ? `${blueprint}\n\n${retryResult}` : retryResult
+  }
+}
+
+// 最终验证
+const finalCount = (blueprint.match(/第\s*\d+\s*章/g) || []).length
+if (finalCount < numberOfChapters) {
+  console.error(`大纲生成完成但数量不足：期望${numberOfChapters}章，实际${finalCount}章`)
+  onProgress(`⚠️ 大纲生成不完整：${finalCount}/${numberOfChapters}章`, numberOfChapters, numberOfChapters)
+}
+```
+
+**chapter-optimized.js 新增要求**：
+```javascript
+// 一次性生成 prompt
+6. **必须生成完整的${params.numberOfChapters}章，不能遗漏任何章节**
+7. **每章都要有标题和本章简述，确保格式完整**
+
+// 分块生成 prompt
+## 重要要求
+1. **必须生成第${params.startChapter}章到第${params.endChapter}章，共${expectedCount}章，不能遗漏**
+2. 每章都要有标题和本章简述
+3. 如果内容过长，也要确保所有章节都生成完整
+```
+
+---
+
+## 📝 主要修改（2026-03-22 10:08）
 
 ### 修改原因
 
@@ -18,9 +79,9 @@
 
 | 文件 | 修改项 | 原值 | 新值 | 变化 |
 |------|--------|------|------|------|
-| `src/prompts/chapter-optimized.js` | 大纲每章简述 | 200-300 字 | **100-150 字** | ⬇️ -50% |
-| `src/prompts/utility-optimized.js` | 前文摘要总字数 | 3000 字 | **9000 字** | ⬆️ +200% |
-| `src/prompts/utility-optimized.js` | 角色状态总字数 | 2500 字 | **5000 字** | ⬆️ +100% |
+| `chapter-optimized.js` | 大纲每章简述 | 200-300 字 | **100-150 字** | ⬇️ -50% |
+| `utility-optimized.js` | 前文摘要总字数 | 3000 字 | **9000 字** | ⬆️ +200% |
+| `utility-optimized.js` | 角色状态总字数 | 2500 字 | **5000 字** | ⬆️ +100% |
 
 ### 详细对比
 
@@ -125,6 +186,7 @@
 3. **角色追踪增强**：5000 字角色状态可追踪 20-30 个重要角色
 4. **时间线清晰**：新增时间线模块，避免时间逻辑错误
 5. **阵营关系明确**：新增阵营关系模块，适合多势力斗争题材
+6. **大纲完整性保证**：新增验证和重试机制，确保生成完整数量
 
 ### ⚠️ 潜在问题
 
@@ -147,8 +209,8 @@
 
 ```
 src/api/generator.js
-  ├─ import chapter-optimized.js  ← 已修改
-  └─ import utility-optimized.js  ← 已修改
+  ├─ import chapter-optimized.js  ← 已修改（大纲 + 验证）
+  └─ import utility-optimized.js  ← 已修改（摘要 + 角色）
 ```
 
 **generator.js 配置**（第 4-11 行）：
@@ -170,13 +232,14 @@ const utilityPromptsToUse = utilityPromptsOptimized
 /home/admin/openclaw/workspace/temp/dream-novel-push/
 ├── src/
 │   ├── api/
-│   │   └── generator.js          # 引用优化版 prompts
+│   │   └── generator.js          # 添加验证和重试机制 ✅
 │   └── prompts/
-│       ├── chapter-optimized.js  ← 已修改
+│       ├── chapter-optimized.js  ← 已修改（大纲 + 强制要求）✅
 │       ├── chapter.js             # 基础版（未修改）
-│       ├── utility-optimized.js  ← 已修改
+│       ├── utility-optimized.js  ← 已修改（摘要 + 角色）✅
 │       └── utility.js             # 基础版（未修改）
-├── .git/
+├── MODIFICATION_HISTORY.md       # 本文档
+├── ANALYSIS_REPORT.md            # 完整分析报告
 └── README.md
 ```
 
@@ -202,12 +265,20 @@ const utilityPromptsToUse = utilityPromptsOptimized
    - 记录每次生成的 token 消耗和时间
    - 分析瓶颈，针对性优化
 
+5. **chunkSize 优化**：
+   - 当前公式：`Math.floor(maxTokens / 200 / 10) * 10 - 10`
+   - 如果频繁生成不完整，可以减小 chunkSize（如每块 20 章而非 30 章）
+
 ---
 
 ## 📅 修改历史
 
 | 日期 | 提交哈希 | 修改内容 | 修改者 |
 |------|---------|---------|--------|
+| 2026-03-22 11:52 | `1736ac2` | chore: 删除临时文件 generator-fixed.js | Halcyon |
+| 2026-03-22 11:52 | `b94dbf5` | fix: 修复章节大纲生成不完整问题（100 章只生成 79 章） | Halcyon |
+| 2026-03-22 11:10 | `8ca5c35` | docs: 添加修改记录文档 (MODIFICATION_HISTORY.md) | Halcyon |
+| 2026-03-22 11:10 | `74506e4` | docs: 添加完整分析报告 (ANALYSIS_REPORT.md) | Halcyon |
 | 2026-03-22 10:08 | `0a75dac` | 优化 prompts: 降低大纲要求 + 增加摘要和角色状态字数限制 | Halcyon |
 | 2026-03-22 09:xx | `814f7d3` | Delete doc/wx-group.jpg | - |
 | 2026-03-22 09:xx | `3e9149d` | Update README.md | - |
@@ -217,10 +288,12 @@ const utilityPromptsToUse = utilityPromptsOptimized
 ## 🔗 相关链接
 
 - **GitHub 仓库**: https://github.com/waitli/dream-novel
-- **本次提交**: https://github.com/waitli/dream-novel/commit/0a75dac
+- **最新提交**: https://github.com/waitli/dream-novel/commit/1736ac2
+- **修改记录**: https://github.com/waitli/dream-novel/blob/main/MODIFICATION_HISTORY.md
+- **分析报告**: https://github.com/waitli/dream-novel/blob/main/ANALYSIS_REPORT.md
 - **体验地址**: https://novel.waitli.top/
 
 ---
 
-**文档更新时间**: 2026-03-22 11:03  
+**文档更新时间**: 2026-03-22 11:52  
 **维护者**: Halcyon
