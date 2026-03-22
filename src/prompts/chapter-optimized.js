@@ -51,6 +51,8 @@ ${params.novelArchitecture}
 3. 角色变化要具体（如：从怀疑→信任）
 4. **严格遵循小说架构中的角色设定和世界观**
 5. 在生成${params.numberOfChapters}章前不要出现结局章节
+6. **必须生成完整的${params.numberOfChapters}章，不能遗漏任何章节**
+7. **每章都要有标题和本章简述，确保格式完整**
 
 **现在开始生成${params.numberOfChapters}章的大纲。**
 
@@ -95,6 +97,11 @@ ${params.chapterList || '(无)'}
 【本章简述】[100-150 字概括]
 
 **注意保持与已有章节的连贯性，伏笔前后一致。**
+
+## 重要要求
+1. **必须生成第${params.startChapter}章到第${params.endChapter}章，共${params.endChapter - params.startChapter + 1}章，不能遗漏**
+2. 每章都要有标题和本章简述
+3. 如果内容过长，也要确保所有章节都生成完整
 
 仅给出最终文本，不要解释任何内容。
 `

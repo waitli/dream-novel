@@ -97,6 +97,7 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
 
 /**
  * Generate chapter blueprint - 生成章节大纲
+ * 修复：添加章节数量验证和重试机制
  */
 export async function generateChapterBlueprint(project, apiConfig, onProgress) {
   const { numberOfChapters, userGuidance } = project
@@ -144,17 +145,24 @@ ${project.plotArchitecture}
       numberOfChapters
     })
     blueprint = cleanResponse(await chatCompletion(apiConfig, prompt))
+    
+    // 验证生成数量
+    const generatedCount = (blueprint.match(/第\s*\d+\s*章/g) || []).length
+    if (generatedCount < numberOfChapters) {
+      console.warn(`大纲生成不完整：期望${numberOfChapters}章，实际${generatedCount}章`)
+    }
   } else {
-    // Chunked generation - 分块生成
+    // Chunked generation - 分块生成（带验证和重试）
     while (currentStart <= numberOfChapters) {
       const currentEnd = Math.min(currentStart + chunkSize - 1, numberOfChapters)
+      const expectedCount = currentEnd - currentStart + 1
       onProgress(
         `正在生成章节大纲 (${currentStart}-${currentEnd})...`,
         currentStart - 1,
         numberOfChapters
       )
 
-      // Limit existing blueprint to last 100 chapters - 限制已有大纲到最近100章
+      // Limit existing blueprint to last 100 chapters - 限制已有大纲到最近 100 章
       const limitedBlueprint = limitChapterBlueprint(blueprint, 100)
 
       const prompt = chunkedChapterBlueprintPrompt({
@@ -169,14 +177,39 @@ ${project.plotArchitecture}
       const chunkResult = cleanResponse(await chatCompletion(apiConfig, prompt))
       
       if (chunkResult) {
-        blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
+        // 验证本块生成的章节数量
+        const actualCount = (chunkResult.match(/第\s*\d+\s*章/g) || []).length
+        if (actualCount < expectedCount) {
+          console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
+          // 尝试重试一次
+          onProgress(`⚠️ 检测到生成不完整 (${actualCount}/${expectedCount})，重试中...`, currentStart - 1, numberOfChapters)
+          const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
+          const retryCount = (retryResult.match(/第\s*\d+\s*章/g) || []).length
+          if (retryCount > actualCount) {
+            blueprint = blueprint ? `${blueprint}\n\n${retryResult}` : retryResult
+            onProgress(`✓ 重试成功：${retryCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
+          } else {
+            blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
+            onProgress(`⚠️ 重试未改善：${actualCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
+          }
+        } else {
+          blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
+        }
       }
 
       currentStart = currentEnd + 1
     }
   }
 
-  onProgress('章节大纲生成完成!', numberOfChapters, numberOfChapters)
+  // 最终验证
+  const finalCount = (blueprint.match(/第\s*\d+\s*章/g) || []).length
+  if (finalCount < numberOfChapters) {
+    console.error(`大纲生成完成但数量不足：期望${numberOfChapters}章，实际${finalCount}章`)
+    onProgress(`⚠️ 大纲生成不完整：${finalCount}/${numberOfChapters}章`, numberOfChapters, numberOfChapters)
+  } else {
+    onProgress('章节大纲生成完成!', numberOfChapters, numberOfChapters)
+  }
+  
   return blueprint
 }
 
@@ -234,7 +267,7 @@ export function parseChapterBlueprint(blueprint) {
  * Extract field value from text - 从文本中提取字段值
  */
 function extractField(text, fieldName) {
-  const pattern = new RegExp(`${fieldName}[：:]\\s*(.+?)(?=\\n|$)`)
+  const pattern = new RegExp(`${fieldName}[：:]\\\\s*(.+?)(?=\\\\n|$)`)
   const match = text.match(pattern)
   return match ? match[1].trim() : ''
 }
