@@ -121,10 +121,12 @@ ${project.plotArchitecture}
 `
 
   // Calculate chunk size based on max tokens - 根据最大 token 数计算分块大小
+  // 修改：降低每批章节数，从 30 章降至 20 章，减少生成失败概率
   const tokensPerChapter = 200
   const maxTokens = apiConfig.maxTokens || 8192
   let chunkSize = Math.floor(maxTokens / tokensPerChapter / 10) * 10 - 10
-  chunkSize = Math.max(1, Math.min(chunkSize, numberOfChapters))
+  // 限制最大 chunkSize 为 20 章/批，防止生成不完整
+  chunkSize = Math.max(1, Math.min(chunkSize, 20, numberOfChapters))
 
   let blueprint = project.chapterBlueprint || ''
   
