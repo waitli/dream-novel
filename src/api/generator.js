@@ -20,7 +20,10 @@ const progressTexts = {
     enrichingChapter: '正在扩写第 {chapter} 章...',
     finalizingChapter: '正在定稿第 {chapter} 章...',
     updatingCharacterState: '正在更新角色状态...',
-    trackingForeshadowing: '正在追踪伏笔...'
+    trackingForeshadowing: '正在追踪伏笔...',
+      generationIncomplete: '⚠️ 检测到生成不完整 ({actual}/{expected})，重试中...',
+      retrySuccess: '✓ 重试成功：{count}/{expected}章',
+      generationComplete: '✓ 生成完成'
   },
   'en-US': {
     generatingCoreSeed: 'Generating core seed...',
@@ -34,7 +37,10 @@ const progressTexts = {
     enrichingChapter: 'Enriching chapter {chapter}...',
     finalizingChapter: 'Finalizing chapter {chapter}...',
     updatingCharacterState: 'Updating character state...',
-    trackingForeshadowing: 'Tracking foreshadowing...'
+    trackingForeshadowing: 'Tracking foreshadowing...',
+      generationIncomplete: '⚠️ Generation incomplete ({actual}/{expected}), retrying...',
+      retrySuccess: '✓ Retry successful: {count}/{expected} chapters',
+      generationComplete: '✓ Generation complete'
   }
 }
 
@@ -235,12 +241,12 @@ ${project.plotArchitecture}
         if (actualCount < expectedCount) {
           console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
           // 尝试重试一次
-          onProgress(`⚠️ 检测到生成不完整 (${actualCount}/${expectedCount})，重试中...`, currentStart - 1, numberOfChapters)
+          onProgress(getProgressText('generationIncomplete', { actual: actualCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
           const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
           const retryCount = (retryResult.match(/第\s*\d+\s*章/g) || []).length
           if (retryCount > actualCount) {
             blueprint = blueprint ? `${blueprint}\n\n${retryResult}` : retryResult
-            onProgress(`✓ 重试成功：${retryCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
+            onProgress(getProgressText('retrySuccess', { count: retryCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
           } else {
             blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
             onProgress(`⚠️ 重试未改善：${actualCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
