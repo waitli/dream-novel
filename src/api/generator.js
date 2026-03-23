@@ -191,7 +191,7 @@ ${project.plotArchitecture}
 
   if (chunkSize >= numberOfChapters && !blueprint) {
     // Single shot generation - 一次性生成
-    onProgress(`正在生成章节大纲 (1-${numberOfChapters})...`, 0, 1)
+    onProgress(getProgressText('generatingChapterBlueprint') + ` (1-${numberOfChapters})...`, 0, 1)
     const prompt = chapterBlueprintPrompt({
       userGuidance,
       novelArchitecture,
@@ -210,7 +210,7 @@ ${project.plotArchitecture}
       const currentEnd = Math.min(currentStart + chunkSize - 1, numberOfChapters)
       const expectedCount = currentEnd - currentStart + 1
       onProgress(
-        `正在生成章节大纲 (${currentStart}-${currentEnd})...`,
+        getProgressText('generatingChapterBlueprintChunk') + ` (${currentStart}-${currentEnd})...`,
         currentStart - 1,
         numberOfChapters
       )
