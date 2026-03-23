@@ -1,6 +1,7 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useSettingsStore } from '../stores/settings'
+import { useI18n } from '../i18n'
 import { useMessage } from 'naive-ui'
 import { NModal, NCard, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NTooltip, NTabs, NTabPane, NSelect, NAutoComplete } from 'naive-ui'
 import { FlashOutline, HelpCircleOutline } from '@vicons/ionicons5'
@@ -12,9 +13,10 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const settings = useSettingsStore()
+const { t } = useI18n()
 const message = useMessage()
 
-// Channel configurations - 渠道配置
+// Channel configurations
 const channels = [
   { 
     id: 'chatfire', 
@@ -50,7 +52,6 @@ const channels = [
     baseUrl: 'https://api.anthropic.com/v1',
     models: ['claude-sonnet-4-5-20250929', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
     getApiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    // Claude 需要特殊处理
     isClaude: true
   },
   {
@@ -59,40 +60,39 @@ const channels = [
     baseUrl: 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}',
     models: ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
     getApiKeyUrl: 'https://portal.azure.com/',
-    // Azure 需要特殊处理
     isAzure: true
   },
   {
     id: 'moonshot',
-    name: '月之暗面 Kimi',
+    name: 'Moonshot Kimi',
     baseUrl: 'https://api.moonshot.cn/v1',
     models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
     getApiKeyUrl: 'https://platform.moonshot.cn/console/api-keys'
   },
   {
     id: 'deepseek',
-    name: 'DeepSeek 深度求索',
+    name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
     models: ['deepseek-chat', 'deepseek-coder'],
     getApiKeyUrl: 'https://platform.deepseek.com/api_keys'
   },
   {
     id: 'baichuan',
-    name: '百川智能',
+    name: 'Baichuan AI',
     baseUrl: 'https://api.baichuan-ai.com/v1',
     models: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan2-Turbo'],
     getApiKeyUrl: 'https://platform.baichuan-ai.com/console/apikey'
   },
   {
     id: 'zhipu',
-    name: '智谱 AI',
+    name: 'Zhipu AI',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     models: ['glm-4', 'glm-4-air', 'glm-3-turbo'],
     getApiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
   },
   {
     id: 'custom',
-    name: '自定义 API',
+    name: 'Custom API',
     baseUrl: '',
     models: [],
     getApiKeyUrl: '',
@@ -100,20 +100,19 @@ const channels = [
   }
 ]
 
-// Current channel - 当前渠道
+// Current channel
 const currentChannel = ref('chatfire')
 
-// Channel options for select - 渠道选项
-const channelOptions = channels.map(c => ({ label: c.name, value: c.id }))
+// Channel options for select
+const channelOptions = computed(() => channels.map(c => ({ label: c.name, value: c.id })))
 
-// Current channel models - 当前渠道的模型列表
-import { computed } from 'vue'
+// Current channel models
 const currentChannelModels = computed(() => {
   const channel = channels.find(c => c.id === currentChannel.value)
   return channel?.models.map(m => ({ label: m, value: m })) || []
 })
 
-// Initialize with default values - 使用默认值初始化
+// Initialize with default values
 const localConfig = ref({
   channel: 'chatfire',
   baseUrl: 'https://api.chatfire.site/v1',
@@ -124,14 +123,14 @@ const localConfig = ref({
   timeout: 600
 })
 
-// Azure 配置（单独存储）
+// Azure config
 const azureConfig = ref({
   resourceName: '',
   deploymentId: '',
   apiVersion: '2024-02-15-preview'
 })
 
-// Handle channel change - 处理渠道切换
+// Handle channel change
 function handleChannelChange(channelId) {
   currentChannel.value = channelId
   const channel = channels.find(c => c.id === channelId)
@@ -144,13 +143,13 @@ function handleChannelChange(channelId) {
   }
 }
 
-// 获取当前渠道的获取 Key 链接
+// Get current channel's get key URL
 function getCurrentGetKeyUrl() {
   const channel = channels.find(c => c.id === currentChannel.value)
   return channel?.getApiKeyUrl || ''
 }
 
-// Stage-specific models - 各环节模型配置
+// Stage-specific models
 const localStageModels = ref({
   architecture: '',
   blueprint: '',
@@ -159,16 +158,16 @@ const localStageModels = ref({
   enrich: ''
 })
 
-// Stage labels - 环节标签
-const stageLabels = {
-  architecture: '架构生成',
-  blueprint: '大纲生成',
-  chapter: '章节生成',
-  finalize: '定稿处理',
-  enrich: '章节扩写'
-}
+// Stage labels - computed dynamically
+const stageLabels = computed(() => ({
+  architecture: t('settings.stages.architecture'),
+  blueprint: t('settings.stages.blueprint'),
+  chapter: t('settings.stages.chapter'),
+  finalize: t('settings.stages.finalize'),
+  enrich: t('settings.stages.enrich')
+}))
 
-// Sync local config when dialog opens - 打开对话框时同步本地配置
+// Sync local config when dialog opens
 watch(() => props.modelValue, (val) => {
   if (val) {
     localConfig.value = { ...settings.apiConfig }
@@ -177,20 +176,20 @@ watch(() => props.modelValue, (val) => {
   }
 }, { immediate: true })
 
-// Save settings - 保存设置
+// Save settings
 function saveSettings() {
   if (!localConfig.value.apiKey) {
-    message.warning('请输入 API Key')
+    message.warning(t('messages.pleaseEnterApiKey'))
     return
   }
   
-  // Azure 特殊处理
+  // Azure special handling
   if (currentChannel.value === 'azure') {
     if (!azureConfig.value.resourceName || !azureConfig.value.deploymentId) {
-      message.warning('请填写 Azure Resource Name 和 Deployment ID')
+      message.warning(t('messages.azureConfigRequired'))
       return
     }
-    // 构建 Azure URL
+    // Build Azure URL
     localConfig.value.baseUrl = `https://${azureConfig.value.resourceName}.openai.azure.com/openai/deployments/${azureConfig.value.deploymentId}`
     settings.updateAzureConfig({
       ...localConfig.value,
@@ -201,14 +200,14 @@ function saveSettings() {
   }
   
   settings.updateStageModels(localStageModels.value)
-  message.success('设置已保存')
+  message.success(t('messages.settingsSaved'))
   emit('update:modelValue', false)
 }
 
-// Test connection - 测试连接
+// Test connection
 async function testConnection() {
   if (!localConfig.value.apiKey) {
-    message.warning('请先输入 API Key')
+    message.warning(t('messages.pleaseEnterApiKey'))
     return
   }
   
@@ -220,12 +219,12 @@ async function testConnection() {
     })
     
     if (response.ok) {
-      message.success('连接成功!')
+      message.success(t('messages.connectionSuccess'))
     } else {
-      message.error('连接失败: ' + response.status)
+      message.error(t('messages.connectionFailed', { error: response.status }))
     }
   } catch (error) {
-    message.error('连接失败: ' + error.message)
+    message.error(t('messages.connectionFailed', { error: error.message }))
   }
 }
 
@@ -237,14 +236,14 @@ async function testConnection() {
     @update:show="emit('update:modelValue', $event)"
     :mask-closable="false"
     preset="card"
-    title="API 设置"
+    :title="t('settings.title')"
     style="width: 520px"
     :bordered="false"
     class="!rounded-2xl"
   >
     <n-form label-placement="top" class="space-y-1">
       <!-- Channel Select -->
-      <n-form-item label="渠道">
+      <n-form-item :label="t('settings.channel')">
         <n-select
           :value="currentChannel"
           :options="channelOptions"
@@ -255,30 +254,30 @@ async function testConnection() {
       <!-- API Base URL -->
       <n-form-item 
         v-if="currentChannel !== 'azure'"
-        label="API Base URL"
+        :label="t('settings.apiBaseUrl')"
       >
         <n-input 
           v-model:value="localConfig.baseUrl" 
-          :placeholder="currentChannel === 'custom' ? '请输入 API Base URL' : channels.find(c => c.id === currentChannel)?.baseUrl"
+          :placeholder="currentChannel === 'custom' ? t('settings.apiBaseUrl') : channels.find(c => c.id === currentChannel)?.baseUrl"
           :disabled="currentChannel !== 'custom'"
         />
       </n-form-item>
 
-      <!-- Azure 特殊配置 -->
+      <!-- Azure special config -->
       <template v-if="currentChannel === 'azure'">
-        <n-form-item label="Resource Name">
+        <n-form-item :label="t('settings.azureResourceName')">
           <n-input 
             v-model:value="azureConfig.resourceName" 
-            placeholder="你的 Azure OpenAI 资源名"
+            :placeholder="t('settings.azureResourceNamePlaceholder')"
           />
         </n-form-item>
-        <n-form-item label="Deployment ID">
+        <n-form-item :label="t('settings.azureDeploymentId')">
           <n-input 
             v-model:value="azureConfig.deploymentId" 
-            placeholder="部署 ID"
+            :placeholder="t('settings.azureDeploymentIdPlaceholder')"
           />
         </n-form-item>
-        <n-form-item label="API Version">
+        <n-form-item :label="t('settings.azureApiVersion')">
           <n-input 
             v-model:value="azureConfig.apiVersion" 
             placeholder="2024-02-15-preview"
@@ -287,11 +286,11 @@ async function testConnection() {
       </template>
 
       <!-- API Key -->
-      <n-form-item label="API Key">
+      <n-form-item :label="t('settings.apiKey')">
         <n-input 
           v-model:value="localConfig.apiKey" 
           type="password"
-          placeholder="请输入 API Key"
+          :placeholder="t('settings.apiKeyPlaceholder')"
           show-password-on="click"
         />
       </n-form-item>
@@ -300,22 +299,22 @@ async function testConnection() {
       <n-form-item>
         <template #label>
           <div class="flex items-center gap-1">
-            <span>默认模型</span>
+            <span>{{ t('settings.defaultModel') }}</span>
             <n-tooltip trigger="hover">
               <template #trigger>
                 <n-icon class="text-gray-400 cursor-help" :size="14">
                   <HelpCircleOutline />
                 </n-icon>
               </template>
-              未单独配置环节模型时使用此模型
+              {{ t('settings.modelHint') }}
             </n-tooltip>
           </div>
         </template>
-<n-auto-complete
+        <n-auto-complete
           v-model:value="localConfig.model"
           :options="currentChannelModels"
           :get-show="() => true"
-          placeholder="选择或输入模型名称"
+          :placeholder="t('settings.defaultModel')"
           clearable
         />
       </n-form-item>
@@ -323,23 +322,23 @@ async function testConnection() {
       <!-- Stage-specific Models -->
       <div class="mt-4">
         <div class="flex items-center gap-1 mb-3">
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">各环节模型配置</span>
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('settings.stageModels') }}</span>
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-icon class="text-gray-400 cursor-help" :size="14">
                 <HelpCircleOutline />
               </n-icon>
             </template>
-            留空则使用默认模型
+            {{ t('settings.stageModelsHint') }}
           </n-tooltip>
         </div>
         <n-tabs type="segment" size="small">
           <n-tab-pane v-for="(label, key) in stageLabels" :key="key" :name="key" :tab="label">
-<n-auto-complete
+            <n-auto-complete
               v-model:value="localStageModels[key]"
               :options="currentChannelModels"
               :get-show="() => true"
-              placeholder="留空使用默认模型"
+              :placeholder="t('settings.stageModelsHint')"
               class="mt-3"
               clearable
             />
@@ -351,19 +350,19 @@ async function testConnection() {
     <template #footer>
       <div class="flex justify-between">
         <n-space>
-          <n-button @click="() => { const url = getCurrentGetKeyUrl(); if(url) window.open(url, '_blank'); else message.warning('该渠道未配置获取 Key 链接') }" tertiary>
-            获取 Key
+          <n-button @click="() => { const url = getCurrentGetKeyUrl(); if(url) window.open(url, '_blank'); else message.warning(t('messages.noGetKeyUrl')) }" tertiary>
+            {{ t('settings.getApiKey') }}
           </n-button>
           <n-button @click="testConnection" tertiary>
             <template #icon>
               <n-icon><FlashOutline /></n-icon>
             </template>
-            测试连接
+            {{ t('settings.testConnection') }}
           </n-button>
         </n-space>
         <n-space>
-          <n-button @click="emit('update:modelValue', false)">取消</n-button>
-          <n-button type="primary" @click="saveSettings">保存</n-button>
+          <n-button @click="emit('update:modelValue', false)">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="saveSettings">{{ t('common.save') }}</n-button>
         </n-space>
       </div>
     </template>

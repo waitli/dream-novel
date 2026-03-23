@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from '../i18n'
 import { NButton, NProgress, NTag, NIcon } from 'naive-ui'
 import { TrashOutline } from '@vicons/ionicons5'
 
@@ -11,35 +12,58 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['click', 'delete'])
+const { t } = useI18n()
 
-// Format date - 格式化日期
+// Genre label mapping
+const genreLabels = {
+  fantasy: 'genres.fantasy',
+  xianxia: 'genres.xianxia',
+  urban: 'genres.urban',
+  historical: 'genres.historical',
+  sciFi: 'genres.sciFi',
+  game: 'genres.game',
+  mystery: 'genres.mystery',
+  magic: 'genres.magic',
+  wuxia: 'genres.wuxia',
+  romance: 'genres.romance',
+  military: 'genres.military',
+  sports: 'genres.sports',
+  supernatural: 'genres.supernatural',
+  anime: 'genres.anime',
+  other: 'genres.other'
+}
+
+// Format date
 function formatDate(dateStr) {
   const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', {
+  const locale = localStorage.getItem('locale') || 'zh-CN'
+  return date.toLocaleDateString(locale === 'zh-CN' ? 'zh-CN' : 'en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
   })
 }
 
-// Get status info - 获取状态信息
+// Get status info
 const statusInfo = computed(() => {
   if (props.project.blueprintGenerated) {
-    return { text: '大纲已生成', type: 'success' }
+    return { text: t('projectCard.outlineGenerated'), type: 'success' }
   }
   if (props.project.architectureGenerated) {
-    return { text: '架构已生成', type: 'warning' }
+    return { text: t('projectCard.architectureGenerated'), type: 'warning' }
   }
-  return { text: '待生成', type: 'info' }
+  return { text: t('projectCard.pending'), type: 'info' }
 })
 
 const genreText = computed(() => {
   const genre = props.project?.genre
-  if (Array.isArray(genre)) return genre.join(' / ')
+  if (Array.isArray(genre)) {
+    return genre.map(g => t(genreLabels[g] || 'genres.other')).join(' / ')
+  }
   return genre || ''
 })
 
-// Calculate progress - 计算进度
+// Calculate progress
 const progress = computed(() => {
   let completed = 0
   if (props.project.coreSeed) completed++
@@ -60,18 +84,18 @@ const progress = computed(() => {
     <!-- <div class="h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-60 group-hover:opacity-100 transition-opacity"></div> -->
     
     <div class="p-5">
-      <!-- Title and actions - 标题和操作 -->
+      <!-- Title and actions -->
       <div class="flex items-start justify-between mb-3">
         <div class="flex-1 min-w-0">
           <h3 class="text-lg font-semibold text-gray-800 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
             {{ project.title }}
           </h3>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {{ genreText }} · {{ project.numberOfChapters }} 章
+            {{ genreText }} · {{ project.numberOfChapters }} {{ t('projectCard.chapters') }}
           </p>
         </div>
         
-        <!-- Delete button - 删除按钮 -->
+        <!-- Delete button -->
         <n-button 
           circle
           quaternary
@@ -85,15 +109,15 @@ const progress = computed(() => {
         </n-button>
       </div>
 
-      <!-- Topic preview - 主题预览 -->
+      <!-- Topic preview -->
       <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-4 leading-relaxed">
         {{ project.topic }}
       </p>
 
-      <!-- Progress bar - 进度条 -->
+      <!-- Progress bar -->
       <div class="mb-4">
         <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
-          <span>生成进度</span>
+          <span>{{ t('projectCard.progress') }}</span>
           <span class="font-medium">{{ progress }}%</span>
         </div>
         <n-progress 
@@ -107,13 +131,13 @@ const progress = computed(() => {
         />
       </div>
 
-      <!-- Footer info - 底部信息 -->
+      <!-- Footer info -->
       <div class="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700/50">
         <n-tag :type="statusInfo.type" size="small" :bordered="false" round>
           {{ statusInfo.text }}
         </n-tag>
         <span class="text-xs text-gray-400">
-          {{ formatDate(project.updatedAt) }}
+          {{ t('projectCard.lastUpdated') }}: {{ formatDate(project.updatedAt) }}
         </span>
       </div>
     </div>

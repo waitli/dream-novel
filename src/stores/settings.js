@@ -4,11 +4,16 @@ import { ref, watch, computed } from 'vue'
 // Default model config - 默认模型配置
 const DEFAULT_MODEL = 'gemini-3-flash-preview'
 
+// Default locale - 默认语言
+const DEFAULT_LOCALE = localStorage.getItem('locale') || 'zh-CN'
+
 // Settings store - 设置状态管理
 export const useSettingsStore = defineStore('settings', () => {
   // State
   const isDark = ref(localStorage.getItem('theme') === 'dark' || 
     (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches))
+  
+  const locale = ref(localStorage.getItem('locale') || 'zh-CN')
   
   const apiConfig = ref(JSON.parse(localStorage.getItem('api_config') || JSON.stringify({
     channel: 'chatfire',
@@ -52,11 +57,29 @@ export const useSettingsStore = defineStore('settings', () => {
       localStorage.setItem('theme', 'light')
     }
   }, { immediate: true })
+  
+  // Watch locale changes and apply - 监听语言变化并应用
+  watch(locale, (newValue) => {
+    localStorage.setItem('locale', newValue)
+    document.documentElement.lang = newValue
+  }, { immediate: true })
 
   // Actions
   // Toggle dark mode - 切换深色模式
   function toggleDark() {
     isDark.value = !isDark.value
+  }
+
+  // Toggle locale - 切换语言
+  function toggleLocale() {
+    locale.value = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
+  }
+
+  // Set locale - 设置语言
+  function setLocale(newLocale) {
+    if (['zh-CN', 'en-US'].includes(newLocale)) {
+      locale.value = newLocale
+    }
   }
 
   // Update API config - 更新 API 配置
@@ -79,9 +102,12 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     isDark,
+    locale,
     apiConfig,
     stageModels,
     toggleDark,
+    toggleLocale,
+    setLocale,
     updateApiConfig,
     updateAzureConfig,
     updateStageModels,
