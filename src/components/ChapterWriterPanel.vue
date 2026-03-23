@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
+import { useI18n } from '../i18n'
 import { generateChapterDraft, finalizeChapter, enrichChapter, parseChapterBlueprint } from '../api/generator'
 import { generateChapterGraph } from '../api/compass-generator'
 import { useMessage, useDialog, NButton, NInput, NProgress, NTag, NIcon, NTooltip } from 'naive-ui'
@@ -18,6 +19,7 @@ const novelStore = useNovelStore()
 const settings = useSettingsStore()
 const message = useMessage()
 const dialog = useDialog()
+const { t } = useI18n()
 
 // Current chapter being written - 当前正在写的章节
 const currentChapter = ref(1)
@@ -70,12 +72,12 @@ function loadChapter(num) {
 // Generate chapter draft - 生成章节草稿
 async function handleGenerate() {
   if (!settings.apiConfig.apiKey) {
-    message.warning('请先在设置中配置 API Key')
+    message.warning(t('messages.pleaseConfigureApiKey'))
     return
   }
 
   if (!props.project?.blueprintGenerated) {
-    message.warning('请先生成章节大纲')
+    message.warning(t('chapterWriter.pleaseGenerateBlueprint'))
     return
   }
 
@@ -83,10 +85,10 @@ async function handleGenerate() {
   if (currentChapter.value > 1 && !props.project?.chapters?.[currentChapter.value - 1]) {
     const confirmed = await new Promise((resolve) => {
       dialog.warning({
-        title: '提示',
+        title: t('common.tip'),
         content: `第 ${currentChapter.value - 1} 章还未生成，建议先按顺序生成。是否继续？`,
-        positiveText: '继续生成',
-        negativeText: '取消',
+        positiveText: t('chapterWriter.continueGenerate'),
+        negativeText: t('common.cancel'),
         onPositiveClick: () => resolve(true),
         onNegativeClick: () => resolve(false)
       })
@@ -123,7 +125,7 @@ async function handleSaveAndFinalize() {
   }
 
   if (!settings.apiConfig.apiKey) {
-    message.warning('请先在设置中配置 API Key')
+    message.warning(t('messages.pleaseConfigureApiKey'))
     return
   }
 
@@ -188,7 +190,7 @@ async function handleEnrich() {
   }
 
   if (!settings.apiConfig.apiKey) {
-    message.warning('请先在设置中配置 API Key')
+    message.warning(t('messages.pleaseConfigureApiKey'))
     return
   }
 
@@ -253,9 +255,9 @@ loadChapter(nextChapterToWrite.value)
       <div class="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-xl shadow-amber-500/25">
         <WarningOutline class="w-12 h-12 text-white" />
       </div>
-      <h3 class="text-2xl font-bold text-gray-800 dark:text-white mb-3">请先生成章节大纲</h3>
+      <h3 class="text-2xl font-bold text-gray-800 dark:text-white mb-3">{{ t('chapterWriter.pleaseGenerateBlueprint') }}</h3>
       <p class="text-gray-500 dark:text-gray-400 max-w-md mx-auto leading-relaxed">
-        章节正文的生成需要基于章节大纲
+        {{ t('chapterWriter.requirement') }}
       </p>
     </div>
 

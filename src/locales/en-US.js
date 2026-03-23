@@ -294,6 +294,37 @@ export default {
     noResults: 'No matching chapters found'
   },
 
+  // Chapter Writer Panel
+  chapterWriter: {
+    pleaseGenerateBlueprint: 'Please Generate Chapter Blueprint First',
+    requirement: 'Chapter content generation requires the chapter blueprint',
+    continueGenerate: 'Continue',
+    generateChapter: 'Generate Chapter',
+    enrichChapter: 'Enrich Chapter',
+    finalizeChapter: 'Finalize Chapter',
+    saveChapter: 'Save Chapter',
+    chapterContent: 'Chapter Content',
+    autoSaved: 'Auto-saved',
+    generateGraph: 'Generate Graph',
+    viewGraph: 'View Graph'
+  },
+
+  // Common
+  common: {
+    tip: 'Tip',
+    generating: 'Generating...',
+    regenerate: 'Regenerate',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    save: 'Save',
+    delete: 'Delete',
+    edit: 'Edit',
+    create: 'Create',
+    loading: 'Loading...',
+    success: 'Success',
+    error: 'Error'
+  },
+
   // Messages
   messages: {
     projectCreated: 'Project created successfully',

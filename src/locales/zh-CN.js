@@ -294,6 +294,37 @@ export default {
     noResults: '没有找到匹配的章节'
   },
 
+  // 章节写作面板
+  chapterWriter: {
+    pleaseGenerateBlueprint: '请先生成章节大纲',
+    requirement: '章节正文的生成需要基于章节大纲',
+    continueGenerate: '继续生成',
+    generateChapter: '生成章节',
+    enrichChapter: '扩写章节',
+    finalizeChapter: '定稿章节',
+    saveChapter: '保存章节',
+    chapterContent: '章节内容',
+    autoSaved: '已自动保存',
+    generateGraph: '生成关系图谱',
+    viewGraph: '查看图谱'
+  },
+
+  // 通用提示
+  common: {
+    tip: '提示',
+    generating: '生成中...',
+    regenerate: '重新生成',
+    cancel: '取消',
+    confirm: '确认',
+    save: '保存',
+    delete: '删除',
+    edit: '编辑',
+    create: '创建',
+    loading: '加载中...',
+    success: '成功',
+    error: '错误'
+  },
+
   // 消息提示
   messages: {
     projectCreated: '项目创建成功',
