@@ -245,6 +245,55 @@ export default {
     }
   },
 
+  // Architecture Panel
+  architecture: {
+    coreSeed: 'Core Seed',
+    coreSeedDesc: 'Story essence and core conflict',
+    characterDynamics: 'Character System',
+    characterDynamicsDesc: 'Dynamic design of core characters',
+    worldBuilding: 'World Building',
+    worldBuildingDesc: 'Three-dimensional world construction',
+    plotArchitecture: 'Plot Architecture',
+    plotArchitectureDesc: 'Three-act suspense structure',
+    characterState: 'Character State',
+    characterStateDesc: 'Initial character state table',
+    startGenerating: 'Start Generating Architecture',
+    description: 'AI will generate core seed, character system, world-building, and plot architecture based on the Snowflake Method',
+    startGenerateButton: 'Generate Architecture',
+    noContent: 'No content yet, click generate to start'
+  },
+
+  // Common
+  common: {
+    generating: 'Generating...',
+    regenerate: 'Regenerate',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    save: 'Save',
+    delete: 'Delete',
+    edit: 'Edit',
+    create: 'Create',
+    loading: 'Loading...',
+    success: 'Success',
+    error: 'Error'
+  },
+
+  // Blueprint Panel
+  blueprint: {
+    pleaseGenerateArchitecture: 'Please Generate Architecture First',
+    requirement: 'Chapter blueprint generation requires the novel architecture (core seed, character system, world-building, plot architecture)',
+    generateTitle: 'Generate Chapter Blueprint',
+    description: 'AI will generate detailed outlines for {chapters} chapters based on the novel architecture, including suspense rhythm curves',
+    startGenerate: 'Start Generating Blueprint',
+    cardView: 'Card View',
+    rawText: 'Raw Text',
+    totalChapters: '{count} chapters total',
+    searchPlaceholder: 'Search chapters...',
+    chapterTitle: 'Chapter {number} - {title}',
+    twistLevel: 'Twist Level',
+    noResults: 'No matching chapters found'
+  },
+
   // Messages
   messages: {
     projectCreated: 'Project created successfully',

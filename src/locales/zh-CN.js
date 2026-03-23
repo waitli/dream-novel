@@ -245,6 +245,55 @@ export default {
     }
   },
 
+  // 架构面板
+  architecture: {
+    coreSeed: '核心种子',
+    coreSeedDesc: '故事的本质和核心冲突',
+    characterDynamics: '角色体系',
+    characterDynamicsDesc: '核心角色的动力学设计',
+    worldBuilding: '世界观',
+    worldBuildingDesc: '三维交织的世界观构建',
+    plotArchitecture: '情节架构',
+    plotArchitectureDesc: '三幕式悬念结构',
+    characterState: '角色状态',
+    characterStateDesc: '角色初始状态表',
+    startGenerating: '开始生成小说架构',
+    description: 'AI 将基于雪花写作法，为你生成核心种子、角色体系、世界观和情节架构',
+    startGenerateButton: '开始生成架构',
+    noContent: '暂无内容，点击生成按钮开始'
+  },
+
+  // 通用
+  common: {
+    generating: '生成中...',
+    regenerate: '重新生成',
+    cancel: '取消',
+    confirm: '确认',
+    save: '保存',
+    delete: '删除',
+    edit: '编辑',
+    create: '创建',
+    loading: '加载中...',
+    success: '成功',
+    error: '错误'
+  },
+
+  // 大纲面板
+  blueprint: {
+    pleaseGenerateArchitecture: '请先生成小说架构',
+    requirement: '章节大纲的生成需要基于小说架构（核心种子、角色体系、世界观、情节架构）',
+    generateTitle: '生成章节大纲',
+    description: 'AI 将基于小说架构，生成 {chapters} 章的详细大纲，包含悬念节奏曲线',
+    startGenerate: '开始生成大纲',
+    cardView: '卡片视图',
+    rawText: '原始文本',
+    totalChapters: '共 {count} 章',
+    searchPlaceholder: '搜索章节...',
+    chapterTitle: '第{number}章 - {title}',
+    twistLevel: '颠覆等级',
+    noResults: '没有找到匹配的章节'
+  },
+
   // 消息提示
   messages: {
     projectCreated: '项目创建成功',
