@@ -4,7 +4,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { useMessage } from 'naive-ui'
 import { NModal, NCard, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NTooltip, NTabs, NTabPane, NSelect, NAutoComplete } from 'naive-ui'
-import { FlashOutline, HelpCircleOutline } from '@vicons/ionicons5'
+import { HelpCircleOutline } from '@vicons/ionicons5'
 
 const props = defineProps({
   modelValue: Boolean
@@ -204,29 +204,6 @@ function saveSettings() {
   emit('update:modelValue', false)
 }
 
-// Test connection
-async function testConnection() {
-  if (!localConfig.value.apiKey) {
-    message.warning(t('messages.pleaseEnterApiKey'))
-    return
-  }
-  
-  try {
-    const response = await fetch(`${localConfig.value.baseUrl}/models`, {
-      headers: {
-        'Authorization': `Bearer ${localConfig.value.apiKey}`
-      }
-    })
-    
-    if (response.ok) {
-      message.success(t('messages.connectionSuccess'))
-    } else {
-      message.error(t('messages.connectionFailed', { error: response.status }))
-    }
-  } catch (error) {
-    message.error(t('messages.connectionFailed', { error: error.message }))
-  }
-}
 
 </script>
 
@@ -354,12 +331,6 @@ async function testConnection() {
         <n-space>
           <n-button @click="() => { const url = getCurrentGetKeyUrl(); if(url) window.open(url, '_blank'); else message.warning(t('messages.noGetKeyUrl')) }" tertiary>
             {{ t('settings.getApiKey') }}
-          </n-button>
-          <n-button @click="testConnection" tertiary>
-            <template #icon>
-              <n-icon><FlashOutline /></n-icon>
-            </template>
-            {{ t('settings.testConnection') }}
           </n-button>
         </n-space>
         <n-space>
