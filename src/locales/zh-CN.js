@@ -40,6 +40,12 @@ export default {
     tagline: '智能生成小说架构、角色体系、世界观和章节大纲，让创作更高效'
   },
 
+  // 安全提醒
+  security: {
+    banner: '🔒 安全提示：本项目为部署在 Cloudflare 上的纯静态项目，不会保存你的 API Key，所有数据都保存在你的浏览器本地。',
+    learnMore: '了解更多'
+  },
+
   // 导航和头部
   header: {
     toggleLightMode: '切换到亮色模式',

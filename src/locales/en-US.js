@@ -40,6 +40,12 @@ export default {
     tagline: 'Intelligently generate novel architecture, character systems, world-building, and chapter outlines to make writing more efficient'
   },
 
+  // Security Banner
+  security: {
+    banner: '🔒 Security Notice: This is a pure static project deployed on Cloudflare. Your API Key is NOT stored on any server. All data is saved locally in your browser.',
+    learnMore: 'Learn More'
+  },
+
   // Navigation and Header
   header: {
     toggleLightMode: 'Switch to Light Mode',

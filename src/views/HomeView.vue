@@ -4,8 +4,8 @@ import { useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
-import { useMessage, useDialog, NButton, NIcon } from 'naive-ui'
-import { AddOutline, DocumentTextOutline, RocketOutline, PersonOutline, TrendingUpOutline } from '@vicons/ionicons5'
+import { useMessage, useDialog, NButton, NIcon, NAlert } from 'naive-ui'
+import { AddOutline, DocumentTextOutline, RocketOutline, PersonOutline, TrendingUpOutline, CloudOutline, ShieldCheckmarkOutline, SaveOutline } from '@vicons/ionicons5'
 import CreateProjectDialog from '../components/CreateProjectDialog.vue'
 import ProjectCard from '../components/ProjectCard.vue'
 
@@ -17,6 +17,7 @@ const message = useMessage()
 const dialog = useDialog()
 
 const showCreateDialog = ref(false)
+const showSecurityBanner = ref(true)
 
 // Delete project with confirmation
 async function handleDelete(project) {
@@ -40,6 +41,32 @@ function openProject(project) {
 
 <template>
   <div class="max-w-6xl mx-auto">
+    <!-- Security Banner -->
+    <n-alert
+      v-if="showSecurityBanner"
+      type="success"
+      :title="settings.locale === 'zh-CN' ? '🔒 安全提示' : '🔒 Security Notice'"
+      closable
+      @close="showSecurityBanner = false"
+      class="mb-6"
+    >
+      {{ t('security.banner') }}
+      <div class="flex items-center gap-4 mt-3 text-sm opacity-80">
+        <span class="flex items-center gap-1">
+          <CloudOutline class="w-4 h-4" />
+          {{ settings.locale === 'zh-CN' ? 'Cloudflare 部署' : 'Cloudflare Deployed' }}
+        </span>
+        <span class="flex items-center gap-1">
+          <ShieldCheckmarkOutline class="w-4 h-4" />
+          {{ settings.locale === 'zh-CN' ? '纯静态项目' : 'Pure Static Project' }}
+        </span>
+        <span class="flex items-center gap-1">
+          <SaveOutline class="w-4 h-4" />
+          {{ settings.locale === 'zh-CN' ? '数据本地存储' : 'Local Storage Only' }}
+        </span>
+      </div>
+    </n-alert>
+
     <!-- Hero Section -->
     <div class="text-center py-16 mb-8">
       <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-sm font-medium mb-6">
