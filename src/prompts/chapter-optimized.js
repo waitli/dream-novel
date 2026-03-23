@@ -1,5 +1,23 @@
 /**
  * Chapter Prompts - 优化版（详细大纲 + 严格遵循）
+ * Bilingual support (Chinese/English)
+ */
+
+// Get current language setting
+function getLocale() {
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('locale') || 'zh-CN'
+  }
+  return 'zh-CN'
+}
+
+// Check if current language is English
+function isEnglish() {
+  return getLocale() === 'en-US'
+}
+
+/**
+ * Chapter Prompts - 优化版（详细大纲 + 严格遵循）
  * 用于生成详细章节大纲和严格遵循大纲的章节正文
  * 
  * 文件来源：https://github.com/waitli/dream-novel/blob/main/src/prompts/chapter-optimized.js
@@ -11,7 +29,58 @@
  * 详细章节大纲提示词（一次性生成）
  * 每章 100-150 字详细大纲（降低要求，确保能生成）
  */
-export const blueprint = (params) => `
+export const blueprint = (params) => {
+  if (isEnglish()) {
+    return `
+Based on the following elements:
+- Content Guidance: ${params.userGuidance || 'None'}
+- Novel Architecture:
+${params.novelArchitecture}
+
+Design the **rhythm distribution** for ${params.numberOfChapters} chapters (adjust style based on genre):
+
+## Chapter Cluster Division
+- Every 3-5 chapters form a plot unit with a complete mini-climax
+- Arrange emotional rhythm reasonably between units (balance tension and relaxation)
+- Reserve foreshadowing for key turning point chapters
+
+## Chapter Design (strictly follow format, 100-150 words per chapter)
+
+Chapter n - [Chapter Title, 8-15 words]
+[Chapter Position] [Character perspective/Key event, 15 words]
+[Core Role] [Main plot progression/Character growth/Relationship change, 20 words]
+[Emotional Tone] [Tense/Warm/Suspenseful, 10 words]
+[Characters] [Main characters and state changes, 30 words]
+[Scene Design] [1-2 main scenes, 30 words]
+[Plot Points]
+  1. Opening: [15 words]
+  2. Development: [30 words]
+  3. Turning Point: [20 words]
+  4. Conclusion: [15 words]
+[Foreshadowing]
+  - Plant: [New foreshadowing and expected recovery chapter]
+  - Strengthen: [Existing foreshadowing deepening]
+  - Recover: [Foreshadowing recovered in this chapter]
+[Suspense Density] [★☆☆☆☆～★★★★★]
+[Plot Tension] [★☆☆☆☆～★★★★★]
+[Chapter Summary] [100-150 words summary, including specific events and character changes]
+
+## Requirements
+1. **Each chapter summary 100-150 words**, including core plot development
+2. Mark expected recovery chapter for foreshadowing (e.g., Foreshadowing A→Chapter 50 recovery)
+3. Character changes should be specific (e.g., from suspicion→trust)
+4. **Strictly follow character settings and world-building from novel architecture**
+5. Do not include ending chapters before generating all ${params.numberOfChapters} chapters
+6. **Must generate complete ${params.numberOfChapters} chapters, no omissions**
+7. **Each chapter must have title and summary, ensure complete format**
+
+**Now generate the outline for ${params.numberOfChapters} chapters.**
+
+Return only the final text, do not explain anything.
+`
+  }
+  
+  return `
 基于以下元素：
 - 内容指导：${params.userGuidance || '无'}
 - 小说架构：
@@ -58,11 +127,61 @@ ${params.novelArchitecture}
 
 仅给出最终文本，不要解释任何内容。
 `
+}
 
 /**
- * 分块章节大纲提示词
+ * Chunked chapter blueprint prompt
  */
-export const blueprintChunked = (params) => `
+export const blueprintChunked = (params) => {
+  if (isEnglish()) {
+    return `
+Based on the following elements:
+- Content Guidance: ${params.userGuidance || 'None'}
+- Novel Architecture:
+${params.novelArchitecture}
+
+Need to generate rhythm distribution for a total of ${params.numberOfChapters} chapters.
+
+Existing chapter list (if empty, this is initial generation):
+${params.chapterList || '(None)'}
+
+Now please design the rhythm distribution for chapters ${params.startChapter} to ${params.endChapter}:
+
+## Chapter Design (strictly follow format, 100-150 words per chapter)
+
+Chapter n - [Chapter Title]
+[Chapter Position]
+[Core Role]
+[Emotional Tone]
+[Characters]
+[Scene Design]
+[Plot Points]
+  1. Opening:
+  2. Development:
+  3. Turning Point:
+  4. Conclusion:
+[Foreshadowing]
+  - Plant:
+  - Strengthen:
+  - Recover:
+[Suspense Density]
+[Plot Tension]
+[Chapter Summary]
+
+## Requirements
+1. Each chapter summary 100-150 words
+2. Mark expected recovery chapter for foreshadowing
+3. Character changes should be specific
+4. Strictly follow novel architecture
+5. Must generate complete chapters from ${params.startChapter} to ${params.endChapter}
+
+**Now generate chapters ${params.startChapter} to ${params.endChapter}.**
+
+Return only the final text, do not explain anything.
+`
+  }
+  
+  return `
 基于以下元素：
 - 内容指导：${params.userGuidance || '无'}
 - 小说架构：
@@ -105,9 +224,10 @@ ${params.chapterList || '(无)'}
 
 仅给出最终文本，不要解释任何内容。
 `
+}
 
 /**
- * 第一章草稿提示词（严格遵循大纲）
+ * First chapter draft prompt
  */
 export const firstDraft = (params) => `
 # 创作任务：第 ${params.chapterNumber} 章《${params.chapterTitle}》
