@@ -332,18 +332,20 @@ async function testConnection() {
             {{ t('settings.stageModelsHint') }}
           </n-tooltip>
         </div>
-        <n-tabs type="segment" size="small">
-          <n-tab-pane v-for="(label, key) in stageLabels" :key="key" :name="key" :tab="label">
+        
+        <!-- Stage models grid layout -->
+        <div class="grid grid-cols-1 gap-3">
+          <div v-for="(label, key) in stageLabels" :key="key" class="space-y-1">
+            <label class="text-xs text-gray-500 dark:text-gray-400">{{ label }}</label>
             <n-auto-complete
               v-model:value="localStageModels[key]"
               :options="currentChannelModels"
               :get-show="() => true"
               :placeholder="t('settings.stageModelsHint')"
-              class="mt-3"
               clearable
             />
-          </n-tab-pane>
-        </n-tabs>
+          </div>
+        </div>
       </div>
     </n-form>
 
