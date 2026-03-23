@@ -1,3 +1,54 @@
+// Get current locale
+function getLocale() {
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('locale') || 'zh-CN'
+  }
+  return 'zh-CN'
+}
+
+// Progress text mapping
+const progressTexts = {
+  'zh-CN': {
+    generatingCoreSeed: '正在生成核心种子...',
+    generatingCharacterDynamics: '正在生成角色体系...',
+    generatingCharacterState: '正在生成角色状态...',
+    generatingWorldBuilding: '正在构建世界观...',
+    generatingPlotArchitecture: '正在设计情节架构...',
+    generatingChapterBlueprint: '正在生成章节大纲...',
+    generatingChapterBlueprintChunk: '正在生成章节大纲',
+    generatingChapterDraft: '正在生成第 {chapter} 章草稿...',
+    enrichingChapter: '正在扩写第 {chapter} 章...',
+    finalizingChapter: '正在定稿第 {chapter} 章...',
+    updatingCharacterState: '正在更新角色状态...',
+    trackingForeshadowing: '正在追踪伏笔...'
+  },
+  'en-US': {
+    generatingCoreSeed: 'Generating core seed...',
+    generatingCharacterDynamics: 'Generating character dynamics...',
+    generatingCharacterState: 'Generating character state...',
+    generatingWorldBuilding: 'Building world...',
+    generatingPlotArchitecture: 'Designing plot architecture...',
+    generatingChapterBlueprint: 'Generating chapter blueprint...',
+    generatingChapterBlueprintChunk: 'Generating chapter blueprint',
+    generatingChapterDraft: 'Generating chapter {chapter} draft...',
+    enrichingChapter: 'Enriching chapter {chapter}...',
+    finalizingChapter: 'Finalizing chapter {chapter}...',
+    updatingCharacterState: 'Updating character state...',
+    trackingForeshadowing: 'Tracking foreshadowing...'
+  }
+}
+
+// Get progress text
+function getProgressText(key, params = {}) {
+  const locale = getLocale()
+  const texts = progressTexts[locale] || progressTexts['zh-CN']
+  let text = texts[key] || key
+  Object.keys(params).forEach(k => {
+    text = text.replace(`{${k}}`, params[k])
+  })
+  return text
+}
+
 import { chatCompletion, cleanResponse } from './llm'
 import { architecturePrompts, chapterPrompts, utilityPrompts } from '../prompts'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
@@ -45,14 +96,14 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
 
   // Step 1: Core seed - 核心种子
   if (!results.coreSeed) {
-    onProgress('正在生成核心种子...', 1, 5)
+    onProgress(getProgressText('generatingCoreSeed'), 1, 5)
     const prompt = coreSeedPrompt(params)
     results.coreSeed = cleanResponse(await chatCompletion(apiConfig, prompt))
   }
 
   // Step 2: Character dynamics - 角色动力学
   if (!results.characterDynamics) {
-    onProgress('正在生成角色体系...', 2, 5)
+    onProgress(getProgressText('generatingCharacterDynamics'), 2, 5)
     const prompt = characterDynamicsPrompt({
       ...params,
       coreSeed: results.coreSeed
@@ -62,7 +113,7 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
 
   // Step 2.5: Character state - 角色状态
   if (!results.characterState && results.characterDynamics) {
-    onProgress('正在生成角色状态...', 2.5, 5)
+    onProgress(getProgressText('generatingCharacterState'), 2.5, 5)
     const prompt = createCharacterStatePrompt({
       characterDynamics: results.characterDynamics
     })
@@ -71,7 +122,7 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
 
   // Step 3: World building - 世界观
   if (!results.worldBuilding) {
-    onProgress('正在构建世界观...', 3, 5)
+    onProgress(getProgressText('generatingWorldBuilding'), 3, 5)
     const prompt = worldBuildingPrompt({
       ...params,
       coreSeed: results.coreSeed
@@ -81,7 +132,7 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
 
   // Step 4: Plot architecture - 情节架构
   if (!results.plotArchitecture) {
-    onProgress('正在设计情节架构...', 4, 5)
+    onProgress(getProgressText('generatingPlotArchitecture'), 4, 5)
     const prompt = plotArchitecturePrompt({
       ...params,
       coreSeed: results.coreSeed,
