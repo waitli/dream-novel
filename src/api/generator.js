@@ -360,8 +360,12 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
     summary: '衔接过渡内容'
   }
 
-  // Build novel setting text - 构建小说设定文本
-  const novelSetting = `
+  let prompt
+  if (chapterNumber === 1) {
+    // First chapter - 第一章
+    onProgress(`正在生成第 ${chapterNumber} 章草稿...`, 0, 3)
+    
+    const novelSetting = `
 小说类型：${formatGenre(project.genre)}
 
 核心种子：${project.coreSeed}
@@ -372,11 +376,6 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
 
 情节架构：${project.plotArchitecture}
 `
-
-  let prompt
-  if (chapterNumber === 1) {
-    // First chapter - 第一章
-    onProgress(`正在生成第 ${chapterNumber} 章草稿...`, 0, 3)
     prompt = firstChapterDraftPrompt({
       chapterNumber,
       chapterTitle: chapterInfo.title,
@@ -398,6 +397,94 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
     const prevChapter = project.chapters?.[chapterNumber - 1] || ''
     const previousChapterExcerpt = prevChapter.slice(-800) || '(无前章内容)'
 
+    // ========== v3 三层记忆架构：组装精简上下文 ==========
+    const hasV3Data = project.chapterSummaries && project.chapterSummaries.length > 0
+    let contextForDraft = ''
+    let characterStateForDraft = ''
+
+    if (hasV3Data) {
+      // 使用 v3 组装器，取最近 20 章 + 相关角色 + 活跃伏笔 + 世界观
+      try {
+        // 解析角色数据库
+        let relevantCharacters = []
+        if (project.characterDB) {
+          try {
+            const charDB = JSON.parse(project.characterDB)
+            // 取活跃的、重要度 >= 3 的角色（最近 20 章内出现过的）
+            relevantCharacters = (charDB.characters || []).filter(c => {
+              const isRecent = (chapterNumber - (c.lastSeen || 0)) <= 20
+              const isImportant = (c.importance || 0) >= 3
+              return c.status === 'active' && (isRecent || isImportant)
+            })
+          } catch (e) {
+            console.warn('角色数据库解析失败，降级处理')
+          }
+        }
+
+        // 解析伏笔数据库
+        let activeForeshadowing = []
+        if (project.foreshadowingDB) {
+          try {
+            const fDB = JSON.parse(project.foreshadowingDB)
+            activeForeshadowing = (fDB.foreshadowing || []).filter(f => 
+              f.status !== 'resolved' && f.status !== 'expired'
+            )
+          } catch (e) {
+            console.warn('伏笔数据库解析失败，降级处理')
+          }
+        }
+
+        // 解析世界观数据库
+        let relevantWorldEntries = []
+        if (project.worldBuildingDB) {
+          try {
+            const wDB = JSON.parse(project.worldBuildingDB)
+            relevantWorldEntries = (wDB.entries || []).filter(w => {
+              const isRecent = (chapterNumber - (w.lastMentioned || 0)) <= 20
+              const isImportant = (w.importance || 0) >= 3
+              return isRecent || isImportant
+            })
+          } catch (e) {
+            console.warn('世界观数据库解析失败，降级处理')
+          }
+        }
+
+        // 用 assembleChapterContext 组装精简上下文
+        contextForDraft = assembleChapterContext({
+          chapterNumber,
+          chapterOutline: chapterInfo.summary,
+          novelTitle: project.title,
+          genre: formatGenre(project.genre),
+          recentSummaries: project.chapterSummaries,
+          recentCount: 20,
+          currentArcSummary: project.currentArcSummary || '',
+          globalArcsSummary: '',
+          relevantCharacters,
+          activeForeshadowing,
+          relevantWorldEntries,
+          previousChapterEnding: previousChapterExcerpt,
+          styleGuide: project.userGuidance || '',
+          writerPrompt: '' // 不在这里加写作指令，交给 nextChapterDraftPrompt
+        })
+
+        // 从角色数据库生成角色状态文本（兼容 nextChapterDraftPrompt）
+        characterStateForDraft = relevantCharacters.map(c => {
+          const lines = [`【${c.name}】(${c.role}) - ${c.currentState?.physical || ''} ${c.currentState?.mental || ''}`]
+          if (c.abilities?.length) lines.push(`  能力：${c.abilities.map(a => `${a.name}(${a.level})`).join('、')}`)
+          if (c.items?.length) lines.push(`  物品：${c.items.map(i => i.name).join('、')}`)
+          if (c.goals?.shortTerm) lines.push(`  目标：${c.goals.shortTerm}`)
+          return lines.join('\n')
+        }).join('\n\n')
+
+      } catch (e) {
+        console.error('v3 上下文组装失败，降级到旧版:', e)
+      }
+    }
+
+    // 降级：如果没有 v3 数据，使用旧版 globalSummary 和 characterState
+    const globalSummaryText = contextForDraft || project.globalSummary || '(这是第一章，暂无前文摘要)'
+    const characterStateText = characterStateForDraft || project.characterState || '(暂无角色状态)'
+
     prompt = nextChapterDraftPrompt({
       chapterNumber,
       chapterTitle: chapterInfo.title,
@@ -408,9 +495,9 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
       plotTwistLevel: chapterInfo.twistLevel,
       chapterSummary: chapterInfo.summary,
       wordNumber: project.wordNumber,
-      globalSummary: project.globalSummary || '(这是第一章，暂无前文摘要)',
+      globalSummary: globalSummaryText,
       previousChapterExcerpt,
-      characterState: project.characterState || '(暂无角色状态)',
+      characterState: characterStateText,
       userGuidance: project.userGuidance,
       shortSummary: '',
       nextChapterNumber: chapterNumber + 1,
