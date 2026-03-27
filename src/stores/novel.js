@@ -33,6 +33,14 @@ export const useNovelStore = defineStore('novel', () => {
       chapters: {},
       // Global summary - 前文摘要
       globalSummary: '',
+      // v3: 结构化存储
+      characterDB: '',          // 角色数据库（JSON）
+      foreshadowingDB: '',      // 伏笔数据库（JSON）
+      worldBuildingDB: '',      // 世界观数据库（JSON）
+      chapterSummaries: [],     // 分章摘要数组
+      currentArcSummary: '',    // 当前弧汇总摘要
+      currentArcName: '',       // 当前弧名称
+      currentArcStart: 1,       // 当前弧起始章节
       // Graph data - 关系图谱数据
       graphData: {
         version: 1,
