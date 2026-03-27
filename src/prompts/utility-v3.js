@@ -430,7 +430,7 @@ ${params.currentWorldDB || '{"entries": []}'}
  * @param {string} params.chapterOutline - 本章大纲
  * @param {string} params.novelTitle - 小说标题
  * @param {string} params.genre - 题材
- * @param {Array} params.recentSummaries - 最近 5 章的摘要 JSON 数组
+ * @param {Array} params.recentSummaries - 最近 20 章的摘要 JSON 数组
  * @param {string} params.currentArcSummary - 当前弧的汇总摘要
  * @param {string} params.globalArcsSummary - 跨弧极简摘要（每个弧 200 字）
  * @param {Array} params.relevantCharacters - 与本章相关的角色 JSON 数组
@@ -442,8 +442,9 @@ ${params.currentWorldDB || '{"entries": []}'}
  */
 export const assembleChapterContext = (params) => {
   // 限制最近摘要的数量和长度
+  const recentCount = params.recentCount || 20;
   const recentSummariesText = (params.recentSummaries || [])
-    .slice(-5) // 只取最近 5 章
+    .slice(-recentCount) // 默认取最近 20 章
     .map(s => `第${s.chapter}章「${s.title}」：${s.summary}`)
     .join('\n');
 
@@ -488,7 +489,7 @@ ${params.styleGuide || '(无特殊要求)'}
 # 上一章结尾（用于衔接）
 ${params.previousChapterEnding ? '...' + params.previousChapterEnding.slice(-500) : '(第一章)'}
 
-# 近期剧情（最近 5 章摘要）
+# 近期剧情（最近 20 章摘要）
 ${recentSummariesText || '(无)'}
 
 # 当前弧摘要
