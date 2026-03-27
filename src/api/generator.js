@@ -21,6 +21,9 @@ const progressTexts = {
     finalizingChapter: '正在定稿第 {chapter} 章...',
     updatingCharacterState: '正在更新角色状态...',
     trackingForeshadowing: '正在追踪伏笔...',
+    updatingCharacterDB: '正在更新角色数据库...',
+    updatingForeshadowingDB: '正在更新伏笔数据库...',
+    updatingWorldBuildingDB: '正在更新世界观数据库...',
       generationIncomplete: '⚠️ 检测到生成不完整 ({actual}/{expected})，重试中...',
       retrySuccess: '✓ 重试成功：{count}/{expected}章',
       generationComplete: '✓ 生成完成'
@@ -59,17 +62,22 @@ import { chatCompletion, cleanResponse } from './llm'
 import { architecturePrompts, chapterPrompts, utilityPrompts } from '../prompts'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
 import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
-import { utilityPrompts as utilityPromptsOptimized } from '../prompts/utility-optimized'
+import { utilityPrompts as utilityPromptsV3 } from '../prompts/utility-v3'
+import {
+  estimateTokens, truncateToTokens,
+  generateChapterSummary, generateArcSummary,
+  updateCharacterDB, updateForeshadowingDB, updateWorldBuildingDB,
+  assembleChapterContext, compressGlobalSummary, migrateOldSummary
+} from '../prompts/utility-v3'
 
 // 解构提示词
 const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, worldBuilding: worldBuildingPrompt, plotArchitecture: plotArchitecturePrompt, characterState: createCharacterStatePrompt } = architecturePrompts
 
-// 使用优化版 prompts
+// 使用 v3 三层记忆架构 prompts
 const chapterPromptsToUse = chapterPromptsOptimized
-const utilityPromptsToUse = utilityPromptsOptimized
+const utilityPromptsToUse = utilityPromptsV3
 
 const { blueprint: chapterBlueprintPrompt, blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
-const { summary: summaryPrompt, updateCharacterState: updateCharacterStatePrompt, trackForeshadowing: trackForeshadowingPrompt } = utilityPromptsToUse
 
 function formatGenre(genre) {
   if (Array.isArray(genre)) return genre.join(' / ')
@@ -423,31 +431,116 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
 }
 
 /**
- * Finalize chapter - 章节定稿（更新摘要和角色状态）
+ * Finalize chapter - 章节定稿（v3 三层记忆架构）
+ * 更新：章节摘要（JSON）、角色数据库、伏笔数据库、世界观数据库
  */
 export async function finalizeChapter(project, chapterNumber, chapterText, apiConfig, onProgress) {
-  onProgress('正在更新前文摘要...', 1, 3)
-  
-  // Update global summary - 更新前文摘要
-  const newSummary = cleanResponse(await chatCompletion(apiConfig, summaryPrompt({
-    chapterText,
-    globalSummary: project.globalSummary || ''
-  })))
-
-  onProgress('正在更新角色状态...', 2, 3)
-  
-  // Update character state - 更新角色状态
-  const newCharacterState = cleanResponse(await chatCompletion(apiConfig, updateCharacterStatePrompt({
-    chapterText,
-    oldState: project.characterState || ''
-  })))
-
-  onProgress('章节定稿完成', 3, 3)
-
-  return {
-    globalSummary: newSummary || project.globalSummary,
-    characterState: newCharacterState || project.characterState
+  const results = {
+    globalSummary: project.globalSummary,
+    characterState: project.characterState,
+    characterDB: project.characterDB,
+    foreshadowingDB: project.foreshadowingDB,
+    worldBuildingDB: project.worldBuildingDB,
+    chapterSummaries: project.chapterSummaries || []
   }
+
+  // 1. 生成本章结构化摘要（v3：每章独立 JSON 条目）
+  onProgress('正在生成章节摘要...', 1, 5)
+  try {
+    const previousChapterSummary = results.chapterSummaries.length > 0
+      ? JSON.stringify(results.chapterSummaries[results.chapterSummaries.length - 1])
+      : ''
+    
+    const summaryResponse = cleanResponse(await chatCompletion(apiConfig, generateChapterSummary({
+      chapterText,
+      chapterNumber,
+      previousChapterSummary,
+      arcSummary: project.currentArcSummary || '',
+      chapterOutline: project.chapterBlueprint || ''
+    })))
+    
+    // 解析 JSON 响应
+    const summaryJson = JSON.parse(summaryResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim())
+    results.chapterSummaries = [...results.chapterSummaries, summaryJson]
+    
+    // 同时更新兼容旧版的 globalSummary（纯文本格式）
+    const summaryText = `第${chapterNumber}章「${summaryJson.title}」：${summaryJson.summary}`
+    results.globalSummary = project.globalSummary
+      ? `${project.globalSummary}\n\n${summaryText}`
+      : summaryText
+  } catch (e) {
+    console.error('章节摘要生成失败:', e)
+    // 降级：使用旧版摘要方式
+    try {
+      const { summary: legacySummaryPrompt } = utilityPromptsV3
+      const legacySummary = cleanResponse(await chatCompletion(apiConfig, legacySummaryPrompt({
+        chapterText,
+        globalSummary: project.globalSummary || ''
+      })))
+      results.globalSummary = legacySummary || project.globalSummary
+    } catch (e2) {
+      console.error('降级摘要也失败:', e2)
+    }
+  }
+
+  // 2. 更新角色数据库（v3：JSON 结构化存储）
+  onProgress('正在更新角色数据库...', 2, 5)
+  try {
+    const charDBResponse = cleanResponse(await chatCompletion(apiConfig, updateCharacterDB({
+      chapterText,
+      currentCharacterDB: project.characterDB || '{"characters": [], "relationships": []}',
+      chapterNumber
+    })))
+    results.characterDB = charDBResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    
+    // 同时更新兼容旧版的 characterState（纯文本格式）
+    try {
+      const db = JSON.parse(results.characterDB)
+      const stateLines = (db.characters || [])
+        .filter(c => c.status === 'active' && c.importance >= 4)
+        .map(c => {
+          const parts = [`【${c.name}】${c.currentState?.physical || ''} ${c.currentState?.mental || ''}`]
+          if (c.abilities?.length) parts.push(`  能力：${c.abilities.map(a => `${a.name}(${a.level})`).join('、')}`)
+          if (c.goals?.shortTerm) parts.push(`  目标：${c.goals.shortTerm}`)
+          return parts.join('\n')
+        })
+      results.characterState = stateLines.join('\n\n') || project.characterState
+    } catch (e) {
+      // JSON 解析失败，保留原 characterState
+    }
+  } catch (e) {
+    console.error('角色数据库更新失败:', e)
+  }
+
+  // 3. 更新伏笔数据库（v3：独立追踪系统）
+  onProgress('正在更新伏笔数据库...', 3, 5)
+  try {
+    const foreshadowingResponse = cleanResponse(await chatCompletion(apiConfig, updateForeshadowingDB({
+      chapterText,
+      currentForeshadowingDB: project.foreshadowingDB || '{"foreshadowing": []}',
+      chapterNumber
+    })))
+    results.foreshadowingDB = foreshadowingResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  } catch (e) {
+    console.error('伏笔数据库更新失败:', e)
+  }
+
+  // 4. 更新世界观数据库（v3：独立词条系统）
+  onProgress('正在更新世界观数据库...', 4, 5)
+  try {
+    const worldResponse = cleanResponse(await chatCompletion(apiConfig, updateWorldBuildingDB({
+      chapterText,
+      currentWorldDB: project.worldBuildingDB || '{"entries": []}',
+      chapterNumber
+    })))
+    results.worldBuildingDB = worldResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  } catch (e) {
+    console.error('世界观数据库更新失败:', e)
+  }
+
+  onProgress('章节定稿完成', 5, 5)
+
+  return results
 }
 
 /**
