@@ -28,6 +28,27 @@ function ensureLink(rel, href) {
   el.setAttribute('href', href)
 }
 
+function ensureJsonLd(id, value) {
+  const selector = `script[data-seo-jsonld="${id}"]`
+  let el = document.head.querySelector(selector)
+
+  if (!value) {
+    if (el) {
+      el.remove()
+    }
+    return
+  }
+
+  const json = JSON.stringify(value)
+  if (!el) {
+    el = document.createElement('script')
+    el.type = 'application/ld+json'
+    el.setAttribute('data-seo-jsonld', id)
+    document.head.appendChild(el)
+  }
+  el.textContent = json
+}
+
 function toAbsoluteUrl(path) {
   return new URL(path.startsWith('/') ? path : `/${path}`, SITE_URL).toString()
 }
@@ -43,12 +64,14 @@ export function useSeo(options) {
   })
   const resolvedLang = computed(() => unref(options.lang) || 'zh-CN')
   const resolvedNoindex = computed(() => Boolean(unref(options.noindex)))
+  const resolvedSchema = computed(() => unref(options.schema) || null)
 
   const stop = watchEffect(() => {
     const title = resolvedTitle.value
     const description = resolvedDescription.value
     const canonical = toAbsoluteUrl(resolvedPath.value)
     const robots = resolvedNoindex.value ? 'noindex,nofollow' : 'index,follow'
+    const image = toAbsoluteUrl('/logo.png')
 
     document.title = title
     document.documentElement.lang = resolvedLang.value
@@ -61,10 +84,14 @@ export function useSeo(options) {
     ensureMeta('og:url', canonical, 'property')
     ensureMeta('og:title', title, 'property')
     ensureMeta('og:description', description, 'property')
+    ensureMeta('og:image', image, 'property')
     ensureMeta('twitter:card', 'summary_large_image')
     ensureMeta('twitter:title', title)
     ensureMeta('twitter:description', description)
+    ensureMeta('twitter:image', image)
+    ensureMeta('application-name', SITE_NAME)
     ensureLink('canonical', canonical)
+    ensureJsonLd('main', resolvedSchema.value)
   })
 
   onBeforeUnmount(() => stop())

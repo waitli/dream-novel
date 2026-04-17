@@ -36,8 +36,8 @@ export default {
   app: {
     name: 'AI Novel Generator',
     subtitle: 'Novel Generator',
-    description: 'AI Writing Tool Based on Snowflake Method',
-    tagline: 'Intelligently generate novel architecture, character systems, world-building, and chapter outlines to make writing more efficient'
+    description: 'AI workspace for long-form novel creation',
+    tagline: 'Go from a core idea to architecture, chapters, and draft prose in one workflow'
   },
 
   // Security Banner

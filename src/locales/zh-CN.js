@@ -36,8 +36,8 @@ export default {
   app: {
     name: 'AI 小说生成器',
     subtitle: 'Novel Generator',
-    description: '基于雪花写作法的 AI 创作工具',
-    tagline: '智能生成小说架构、角色体系、世界观和章节大纲，让创作更高效'
+    description: '面向长篇小说创作的 AI 工作台',
+    tagline: '从核心创意到架构、章节和正文草稿，一站式完成小说创作'
   },
 
   // 安全提醒
