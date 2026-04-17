@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "generate:sitemap": "node scripts/generate-sitemap.mjs",
+    "build": "npm run generate:sitemap && vite build",
     "preview": "vite preview",
     "deploy:pages": "npm run build && wrangler pages deploy dist",
     "deploy:pages:prod": "npm run build && wrangler pages deploy dist --project-name=dream-novel --branch=main",

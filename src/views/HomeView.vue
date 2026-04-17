@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
+import { useSeo } from '../composables/useSeo'
 import { useMessage, useDialog, NButton, NIcon, NAlert } from 'naive-ui'
 import { AddOutline, DocumentTextOutline, RocketOutline, PersonOutline, TrendingUpOutline, CloudOutline, ShieldCheckmarkOutline, SaveOutline } from '@vicons/ionicons5'
 import CreateProjectDialog from '../components/CreateProjectDialog.vue'
@@ -18,6 +19,25 @@ const dialog = useDialog()
 
 const showCreateDialog = ref(false)
 const showSecurityBanner = ref(true)
+
+const seoTitle = computed(() =>
+  settings.locale === 'zh-CN'
+    ? `${t('app.name')} | AI 小说生成器`
+    : `${t('app.name')} | AI Novel Generator`
+)
+const seoDescription = computed(() =>
+  settings.locale === 'zh-CN'
+    ? '基于雪花写作法的 AI 小说生成器，支持项目管理、架构生成与章节创作。'
+    : 'AI novel generator based on the Snowflake Method, with project management, architecture generation, and chapter writing.'
+)
+
+useSeo({
+  title: seoTitle,
+  description: seoDescription,
+  path: '/',
+  lang: computed(() => settings.locale),
+  noindex: false
+})
 
 // Delete project with confirmation
 async function handleDelete(project) {

@@ -62,7 +62,7 @@ import { chatCompletion, cleanResponse } from './llm'
 import { architecturePrompts, chapterPrompts, utilityPrompts } from '../prompts'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
 import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
-import { utilityPrompts as utilityPromptsV3 } from '../prompts/utility-v3'
+import { utilityPromptsV3 } from '../prompts/utility-v3'
 import {
   estimateTokens, truncateToTokens,
   generateChapterSummary, generateArcSummary,

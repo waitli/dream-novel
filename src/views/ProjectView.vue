@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
+import { useSeo } from '../composables/useSeo'
 import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
 import { useMessage, useDialog, NButton, NTabs, NTabPane, NCard, NProgress, NTag, NIcon } from 'naive-ui'
 import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline, CompassOutline } from '@vicons/ionicons5'
@@ -48,6 +49,33 @@ const genreText = computed(() => {
   const genre = project.value?.genre
   if (Array.isArray(genre)) return genre.join(' / ')
   return genre || ''
+})
+
+const seoTitle = computed(() => {
+  const title = project.value?.title || (settings.locale === 'zh-CN' ? '小说项目' : 'Novel Project')
+  return settings.locale === 'zh-CN'
+    ? `${title} | AI 小说生成器`
+    : `${title} | AI Novel Generator`
+})
+
+const seoDescription = computed(() => {
+  const title = project.value?.title || ''
+  if (settings.locale === 'zh-CN') {
+    return title
+      ? `查看小说项目《${title}》的架构、章节大纲和创作进度。`
+      : '查看小说项目的架构、章节大纲和创作进度。'
+  }
+  return title
+    ? `View the story project "${title}" with architecture, chapter outlines, and writing progress.`
+    : 'View the story project with architecture, chapter outlines, and writing progress.'
+})
+
+useSeo({
+  title: seoTitle,
+  description: seoDescription,
+  path: computed(() => `/project/${route.params.id || ''}`),
+  lang: computed(() => settings.locale),
+  noindex: true
 })
 
 // Load project on mount
