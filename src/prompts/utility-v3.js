@@ -117,6 +117,173 @@ ${params.arcSummary || '(无)'}
 仅返回 JSON，不要任何解释。
 `;
 
+/**
+ * 单次章节事实提取。
+ *
+ * 用一次 LLM 调用同时提取章节摘要、角色变化、伏笔变化和世界观词条变化。
+ * 返回的是 delta 事实包，由代码负责合并到现有数据库，避免让模型整库重写。
+ *
+ * @param {Object} params
+ * @param {string} params.chapterText - 本章全文
+ * @param {number} params.chapterNumber - 章节号
+ * @param {string} params.chapterOutline - 本章大纲
+ * @param {string} params.previousChapterSummary - 上一章摘要
+ * @param {string} params.arcSummary - 当前弧摘要
+ * @param {string} params.currentCharacterDB - 当前角色数据库
+ * @param {string} params.currentForeshadowingDB - 当前伏笔数据库
+ * @param {string} params.currentWorldDB - 当前世界观数据库
+ */
+export const extractChapterFacts = (params) => `
+你是一个小说连续性编辑。你的任务是从已定稿章节中提取“增量事实”，供程序合并到记忆数据库。
+
+## 本章内容
+${params.chapterText}
+
+## 本章大纲（参考）
+${params.chapterOutline || '(无)'}
+
+## 上一章摘要
+${params.previousChapterSummary || '(无)'}
+
+## 当前弧/卷摘要
+${params.arcSummary || '(无)'}
+
+## 当前角色数据库（只用于保持 id 和避免重复）
+${params.currentCharacterDB || '{"characters": [], "relationships": []}'}
+
+## 当前伏笔数据库（只用于判断埋设/强化/回收）
+${params.currentForeshadowingDB || '{"foreshadowing": []}'}
+
+## 当前世界观数据库（只用于避免重复词条）
+${params.currentWorldDB || '{"entries": []}'}
+
+---
+
+请只输出 JSON，不要解释。输出的是“本章事实增量”，不是完整数据库。
+
+\`\`\`json
+{
+  "chapterSummary": {
+    "chapter": ${params.chapterNumber},
+    "title": "本章标题或一句话概括",
+    "summary": "本章核心事件摘要，200-300字，包含起因经过结果",
+    "events": [
+      {
+        "type": "剧情推进/角色互动/世界观揭示/伏笔埋设/伏笔回收/转折",
+        "description": "事件描述，50-80字",
+        "characters": ["涉及角色名"],
+        "importance": 1
+      }
+    ],
+    "characterUpdates": [
+      {
+        "name": "角色名",
+        "changes": "本章该角色的变化，50字以内",
+        "newItems": ["获得的物品"],
+        "newAbilities": ["获得的能力"],
+        "relationshipChanges": [
+          {"target": "对方角色", "change": "关系变化描述"}
+        ]
+      }
+    ],
+    "foreshadowing": {
+      "planted": ["新埋设的伏笔描述"],
+      "reinforced": ["本章再次提及的伏笔"],
+      "resolved": ["本章回收的伏笔"]
+    },
+    "worldBuilding": ["本章新增或确认的世界观设定"],
+    "mood": "本章整体氛围",
+    "cliffhanger": "本章结尾钩子/悬念，如无则为null",
+    "arcStatus": "当前弧的进展状态，一句话"
+  },
+  "characters": [
+    {
+      "id": "沿用现有角色id；新角色使用稳定英文或拼音id",
+      "name": "角色名",
+      "role": "protagonist/supporting/minor/antagonist",
+      "status": "active/absent/dead",
+      "profile": {
+        "identity": "身份，20字",
+        "personality": "性格特征，50字",
+        "background": "背景，50字"
+      },
+      "currentState": {
+        "physical": "身体状态，30字",
+        "mental": "心理状态，30字",
+        "location": "当前位置"
+      },
+      "items": [
+        {"name": "物品名", "source": "第${params.chapterNumber}章", "function": "用途，20字"}
+      ],
+      "abilities": [
+        {"name": "能力名", "level": "等级", "limitation": "限制，20字"}
+      ],
+      "goals": {
+        "shortTerm": "短期目标，30字",
+        "longTerm": "长期目标，30字"
+      },
+      "importance": 1,
+      "tags": ["标签"]
+    }
+  ],
+  "relationships": [
+    {
+      "from": "角色A的id或姓名",
+      "to": "角色B的id或姓名",
+      "type": "trust/enemy/love/rival/mentor/family/ally",
+      "strength": 1,
+      "event": "本章关系变化事件",
+      "currentStatus": "当前关系状态，30字"
+    }
+  ],
+  "factions": [
+    {
+      "name": "阵营/势力名",
+      "members": ["角色id列表"],
+      "stance": "对主角阵营的态度",
+      "status": "当前状态"
+    }
+  ],
+  "foreshadowing": [
+    {
+      "id": "沿用现有伏笔id；新伏笔使用稳定英文或拼音id",
+      "name": "伏笔名称/简述",
+      "type": "item/identity/relationship/event/world/ability",
+      "action": "planted/reinforced/resolved",
+      "status": "planted/reinforced/resolved",
+      "plantedChapter": ${params.chapterNumber},
+      "plantedDescription": "埋设时的具体描写，50字",
+      "resolvedChapter": null,
+      "resolvedDescription": null,
+      "importance": 1,
+      "relatedCharacters": ["角色id或姓名"],
+      "detail": "本章对该伏笔的操作细节",
+      "expectedResolution": "预计在什么情境下回收，50字"
+    }
+  ],
+  "worldBuilding": [
+    {
+      "id": "沿用现有词条id；新词条使用稳定英文或拼音id",
+      "name": "设定名称",
+      "category": "geography/history/culture/magic_system/technology/politics/creature/item",
+      "description": "本章新增或确认的信息，100字",
+      "rules": "相关规则和限制，50字",
+      "relatedCharacters": ["角色id或姓名"],
+      "relatedEntries": ["关联词条id或名称"],
+      "importance": 1
+    }
+  ]
+}
+\`\`\`
+
+规则：
+1. 只提取正文中已经发生、已经确认、强暗示的信息，不要补写未来剧情。
+2. 已有角色、伏笔、词条必须尽量沿用现有 id。
+3. arrays 如果没有内容返回 []，不要省略字段。
+4. importance/strength 使用数字，不要写区间。
+5. 仅返回 JSON。
+`;
+
 
 // ========================
 // 第二层：弧/卷级汇总摘要
@@ -615,6 +782,7 @@ ${params.oldSummary}
 export const utilityPromptsV3 = {
   // 核心更新函数
   generateChapterSummary,
+  extractChapterFacts,
   generateArcSummary,
   updateCharacterDB,
   updateForeshadowingDB,

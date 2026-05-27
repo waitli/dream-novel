@@ -59,13 +59,12 @@ function getProgressText(key, params = {}) {
 }
 
 import { chatCompletion, cleanResponse } from './llm'
-import { architecturePrompts, chapterPrompts, utilityPrompts } from '../prompts'
+import { architecturePrompts } from '../prompts'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
 import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
-import { utilityPromptsV3 } from '../prompts/utility-v3'
 import {
-  estimateTokens, truncateToTokens,
-  generateChapterSummary, generateArcSummary,
+  estimateTokens,
+  generateChapterSummary, extractChapterFacts, generateArcSummary,
   updateCharacterDB, updateForeshadowingDB, updateWorldBuildingDB,
   assembleChapterContext, compressGlobalSummary, migrateOldSummary
 } from '../prompts/utility-v3'
@@ -75,9 +74,11 @@ const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, wo
 
 // 使用 v3 三层记忆架构 prompts
 const chapterPromptsToUse = chapterPromptsOptimized
-const utilityPromptsToUse = utilityPromptsV3
 
 const { blueprint: chapterBlueprintPrompt, blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
+
+const DEFAULT_ARC_SIZE = 10
+const GLOBAL_SUMMARY_TOKEN_LIMIT = 4500
 
 function formatGenre(genre) {
   if (Array.isArray(genre)) return genre.join(' / ')
@@ -625,7 +626,7 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
           recentSummaries: project.chapterSummaries,
           recentCount: 20,
           currentArcSummary: project.currentArcSummary || '',
-          globalArcsSummary: '',
+          globalArcsSummary: project.globalArcsSummary || '',
           relevantCharacters,
           activeForeshadowing,
           relevantWorldEntries,
@@ -689,6 +690,418 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
   return chapterText
 }
 
+function parseJsonResponse(response, fallback = null) {
+  const text = cleanResponse(response || '')
+  if (!text) return fallback
+
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    const objectStart = text.indexOf('{')
+    const objectEnd = text.lastIndexOf('}')
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      try {
+        return JSON.parse(text.slice(objectStart, objectEnd + 1))
+      } catch (innerError) {
+        // Continue to array fallback.
+      }
+    }
+
+    const arrayStart = text.indexOf('[')
+    const arrayEnd = text.lastIndexOf(']')
+    if (arrayStart >= 0 && arrayEnd > arrayStart) {
+      try {
+        return JSON.parse(text.slice(arrayStart, arrayEnd + 1))
+      } catch (innerError) {
+        // Fall through to fallback.
+      }
+    }
+  }
+
+  return fallback
+}
+
+function normalizeChapterSummary(summary, chapterNumber) {
+  if (!summary || typeof summary !== 'object') return null
+
+  const chapter = Number.parseInt(summary.chapter ?? summary.chapterNumber ?? chapterNumber, 10)
+  if (!Number.isFinite(chapter)) return null
+
+  return {
+    ...summary,
+    chapter,
+    title: summary.title || `第${chapter}章`,
+    summary: summary.summary || ''
+  }
+}
+
+function upsertChapterSummary(chapterSummaries, nextSummary) {
+  const normalized = normalizeChapterSummary(nextSummary)
+  if (!normalized) return chapterSummaries || []
+
+  const existing = Array.isArray(chapterSummaries) ? chapterSummaries : []
+  const withoutCurrent = existing.filter(summary => Number(summary?.chapter) !== normalized.chapter)
+
+  return [...withoutCurrent, normalized]
+    .filter(summary => Number.isFinite(Number(summary?.chapter)))
+    .sort((a, b) => Number(a.chapter) - Number(b.chapter))
+}
+
+function getProjectArcSize(project) {
+  const configured = Number.parseInt(project?.arcSize, 10)
+  if (Number.isFinite(configured) && configured > 0) return configured
+  return DEFAULT_ARC_SIZE
+}
+
+function getArcRange(project, chapterNumber) {
+  const arcSize = getProjectArcSize(project)
+  const configuredStart = Number.parseInt(project?.currentArcStart, 10)
+  const inferredStart = Math.floor((chapterNumber - 1) / arcSize) * arcSize + 1
+  const start = Number.isFinite(configuredStart) &&
+    configuredStart > 0 &&
+    configuredStart <= chapterNumber &&
+    chapterNumber < configuredStart + arcSize
+      ? configuredStart
+      : inferredStart
+
+  const novelEnd = Number.parseInt(project?.numberOfChapters, 10)
+  const end = Math.min(
+    start + arcSize - 1,
+    Number.isFinite(novelEnd) && novelEnd > 0 ? novelEnd : start + arcSize - 1
+  )
+
+  return { start, end, size: arcSize }
+}
+
+function getArcName(project, start, end) {
+  return project?.currentArcName || `第${start}-${end}章剧情弧`
+}
+
+function upsertArcSummary(arcSummaries, arcSummary) {
+  const existing = Array.isArray(arcSummaries) ? arcSummaries : []
+  const withoutCurrent = existing.filter(item => Number(item?.startChapter) !== Number(arcSummary.startChapter))
+
+  return [...withoutCurrent, arcSummary]
+    .filter(item => Number.isFinite(Number(item?.startChapter)))
+    .sort((a, b) => Number(a.startChapter) - Number(b.startChapter))
+}
+
+function buildGlobalArcsSummary(arcSummaries) {
+  return (arcSummaries || [])
+    .map(arc => `【${arc.name || `第${arc.startChapter}-${arc.endChapter}章`}】\n${arc.summary || ''}`)
+    .filter(Boolean)
+    .join('\n\n')
+    .trim()
+}
+
+function buildCompatibilitySummary({ chapterSummaries, currentArcSummary, globalArcsSummary }) {
+  const recentSummaryText = (chapterSummaries || [])
+    .slice(-8)
+    .map(summary => `第${summary.chapter}章「${summary.title || ''}」：${summary.summary || ''}`)
+    .join('\n\n')
+
+  return [
+    globalArcsSummary ? `# 已完成剧情弧\n${globalArcsSummary}` : '',
+    currentArcSummary ? `# 当前剧情弧\n${currentArcSummary}` : '',
+    recentSummaryText ? `# 最近章节\n${recentSummaryText}` : ''
+  ].filter(Boolean).join('\n\n').trim()
+}
+
+function parseJsonDb(value, fallback) {
+  if (!value) return { ...fallback }
+  if (typeof value === 'object') return value
+
+  return parseJsonResponse(value, { ...fallback }) || { ...fallback }
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  return true
+}
+
+function mergeUniqueStrings(existing = [], incoming = []) {
+  const seen = new Set()
+  return [...asArray(existing), ...asArray(incoming)]
+    .filter(item => hasValue(item))
+    .filter(item => {
+      const key = String(item).trim()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function mergeObjectList(existing = [], incoming = [], keyFields = ['id', 'name']) {
+  const result = [...asArray(existing)]
+
+  for (const item of asArray(incoming)) {
+    if (!item || typeof item !== 'object') continue
+    const index = result.findIndex(existingItem => keyFields.some(field =>
+      hasValue(item[field]) && existingItem?.[field] === item[field]
+    ))
+
+    if (index >= 0) {
+      result[index] = mergePlainObject(result[index], item)
+    } else {
+      result.push(item)
+    }
+  }
+
+  return result
+}
+
+function mergeCompositeObjectList(existing = [], incoming = [], keyFields = []) {
+  const result = [...asArray(existing)]
+
+  for (const item of asArray(incoming)) {
+    if (!item || typeof item !== 'object') continue
+    const index = result.findIndex(existingItem =>
+      keyFields.length > 0 &&
+      keyFields.every(field => hasValue(item[field]) && existingItem?.[field] === item[field])
+    )
+
+    if (index >= 0) {
+      result[index] = mergePlainObject(result[index], item)
+    } else {
+      result.push(item)
+    }
+  }
+
+  return result
+}
+
+function mergePlainObject(existing = {}, incoming = {}) {
+  const result = { ...(existing || {}) }
+
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (!hasValue(value)) continue
+
+    if (Array.isArray(value)) {
+      const current = asArray(result[key])
+      const hasObjectItems = [...current, ...value].some(item => item && typeof item === 'object')
+      result[key] = hasObjectItems
+        ? mergeObjectList(current, value)
+        : mergeUniqueStrings(current, value)
+    } else if (typeof value === 'object') {
+      result[key] = mergePlainObject(result[key], value)
+    } else {
+      result[key] = value
+    }
+  }
+
+  return result
+}
+
+function findCharacter(characters, character) {
+  return characters.find(existing =>
+    (hasValue(character.id) && existing.id === character.id) ||
+    (hasValue(character.name) && existing.name === character.name)
+  )
+}
+
+function normalizeCharacterFact(character, chapterNumber, existingCharacters, index) {
+  if (!character || typeof character !== 'object') return null
+
+  const existing = findCharacter(existingCharacters, character)
+  const id = character.id || existing?.id || character.name || `character-${chapterNumber}-${index + 1}`
+  const firstSeen = Number.isFinite(Number(existing?.firstSeen))
+    ? Number(existing.firstSeen)
+    : chapterNumber
+
+  return {
+    ...character,
+    id,
+    name: character.name || existing?.name || id,
+    status: character.status || existing?.status || 'active',
+    firstSeen,
+    lastSeen: chapterNumber,
+    importance: Number.parseInt(character.importance ?? existing?.importance ?? 1, 10)
+  }
+}
+
+function mergeCharacterDB(currentDB, facts, chapterNumber) {
+  const db = parseJsonDb(currentDB, { characters: [], relationships: [], factions: [], metadata: {} })
+  const characters = asArray(db.characters)
+
+  for (const rawCharacter of asArray(facts.characters)) {
+    const character = normalizeCharacterFact(rawCharacter, chapterNumber, characters, characters.length)
+    if (!character) continue
+
+    const existingIndex = characters.findIndex(existing => existing.id === character.id || existing.name === character.name)
+    if (existingIndex >= 0) {
+      characters[existingIndex] = mergePlainObject(characters[existingIndex], character)
+    } else {
+      characters.push(character)
+    }
+  }
+
+  const relationships = asArray(db.relationships)
+  for (const relationship of asArray(facts.relationships)) {
+    if (!relationship?.from || !relationship?.to) continue
+    const existingIndex = relationships.findIndex(existing =>
+      existing.from === relationship.from &&
+      existing.to === relationship.to &&
+      existing.type === relationship.type
+    )
+    const historyEntry = relationship.event
+      ? { chapter: chapterNumber, event: relationship.event }
+      : null
+    const normalized = {
+      ...relationship,
+      history: historyEntry ? [historyEntry] : asArray(relationship.history)
+    }
+
+    if (existingIndex >= 0) {
+      const previous = relationships[existingIndex]
+      relationships[existingIndex] = {
+        ...mergePlainObject(previous, normalized),
+        history: mergeCompositeObjectList(previous.history, normalized.history, ['chapter', 'event'])
+      }
+    } else {
+      relationships.push(normalized)
+    }
+  }
+
+  const factions = mergeObjectList(db.factions, facts.factions, ['name'])
+  const activeCharacters = characters.filter(character => character.status === 'active').length
+
+  return {
+    ...db,
+    characters,
+    relationships,
+    factions,
+    metadata: {
+      ...(db.metadata || {}),
+      totalCharacters: characters.length,
+      activeCharacters,
+      lastUpdated: chapterNumber
+    }
+  }
+}
+
+function findForeshadowing(items, item) {
+  return items.find(existing =>
+    (hasValue(item.id) && existing.id === item.id) ||
+    (hasValue(item.name) && existing.name === item.name)
+  )
+}
+
+function mergeForeshadowingDB(currentDB, facts, chapterNumber) {
+  const db = parseJsonDb(currentDB, { foreshadowing: [], statistics: {} })
+  const foreshadowing = asArray(db.foreshadowing)
+
+  for (const rawItem of asArray(facts.foreshadowing)) {
+    if (!rawItem || typeof rawItem !== 'object') continue
+    const existing = findForeshadowing(foreshadowing, rawItem)
+    const action = rawItem.action || rawItem.status || 'reinforced'
+    const id = rawItem.id || existing?.id || rawItem.name || `foreshadowing-${chapterNumber}-${foreshadowing.length + 1}`
+    const timelineEntry = {
+      chapter: chapterNumber,
+      action,
+      detail: rawItem.detail || rawItem.plantedDescription || rawItem.resolvedDescription || rawItem.name || ''
+    }
+    const normalized = {
+      ...rawItem,
+      id,
+      name: rawItem.name || existing?.name || id,
+      plantedChapter: rawItem.plantedChapter || existing?.plantedChapter || chapterNumber,
+      status: rawItem.status || action,
+      resolvedChapter: action === 'resolved' ? (rawItem.resolvedChapter || chapterNumber) : rawItem.resolvedChapter,
+      timeline: [timelineEntry],
+      importance: Number.parseInt(rawItem.importance ?? existing?.importance ?? 1, 10)
+    }
+    delete normalized.action
+    delete normalized.detail
+
+    const existingIndex = foreshadowing.findIndex(item => item.id === id || item.name === normalized.name)
+    if (existingIndex >= 0) {
+      const previous = foreshadowing[existingIndex]
+      foreshadowing[existingIndex] = {
+        ...mergePlainObject(previous, normalized),
+        timeline: mergeCompositeObjectList(previous.timeline, normalized.timeline, ['chapter', 'action', 'detail'])
+      }
+    } else {
+      foreshadowing.push(normalized)
+    }
+  }
+
+  for (const item of foreshadowing) {
+    if (item.status !== 'resolved' && item.status !== 'expired' && chapterNumber - Number(item.plantedChapter || chapterNumber) > 35) {
+      item.status = 'expired'
+    }
+  }
+
+  const active = foreshadowing.filter(item => item.status !== 'resolved' && item.status !== 'expired').length
+  const resolved = foreshadowing.filter(item => item.status === 'resolved').length
+  const overdue = foreshadowing.filter(item => item.status === 'expired').length
+
+  return {
+    ...db,
+    foreshadowing,
+    statistics: {
+      total: foreshadowing.length,
+      active,
+      resolved,
+      overdue
+    }
+  }
+}
+
+function mergeWorldBuildingDB(currentDB, facts, chapterNumber) {
+  const db = parseJsonDb(currentDB, { entries: [] })
+  const entries = asArray(db.entries)
+
+  for (const rawEntry of asArray(facts.worldBuilding)) {
+    if (!rawEntry || typeof rawEntry !== 'object') continue
+    const existing = entries.find(entry =>
+      (hasValue(rawEntry.id) && entry.id === rawEntry.id) ||
+      (hasValue(rawEntry.name) && entry.name === rawEntry.name)
+    )
+    const id = rawEntry.id || existing?.id || rawEntry.name || `world-${chapterNumber}-${entries.length + 1}`
+    const normalized = {
+      ...rawEntry,
+      id,
+      name: rawEntry.name || existing?.name || id,
+      firstMentioned: rawEntry.firstMentioned || existing?.firstMentioned || chapterNumber,
+      lastMentioned: chapterNumber,
+      importance: Number.parseInt(rawEntry.importance ?? existing?.importance ?? 1, 10)
+    }
+
+    const existingIndex = entries.findIndex(entry => entry.id === id || entry.name === normalized.name)
+    if (existingIndex >= 0) {
+      entries[existingIndex] = mergePlainObject(entries[existingIndex], normalized)
+    } else {
+      entries.push(normalized)
+    }
+  }
+
+  return { ...db, entries }
+}
+
+function buildCharacterStateFromDB(characterDB, fallback = '') {
+  try {
+    const db = typeof characterDB === 'string' ? JSON.parse(characterDB) : characterDB
+    const stateLines = (db.characters || [])
+      .filter(c => c.status === 'active' && c.importance >= 4)
+      .map(c => {
+        const parts = [`【${c.name}】${c.currentState?.physical || ''} ${c.currentState?.mental || ''}`]
+        if (c.abilities?.length) parts.push(`  能力：${c.abilities.map(a => `${a.name}(${a.level})`).join('、')}`)
+        if (c.goals?.shortTerm) parts.push(`  目标：${c.goals.shortTerm}`)
+        return parts.join('\n')
+      })
+    return stateLines.join('\n\n') || fallback
+  } catch (e) {
+    return fallback
+  }
+}
+
 /**
  * Finalize chapter - 章节定稿（v3 三层记忆架构）
  * 更新：章节摘要（JSON）、角色数据库、伏笔数据库、世界观数据库
@@ -700,104 +1113,206 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
     characterDB: project.characterDB,
     foreshadowingDB: project.foreshadowingDB,
     worldBuildingDB: project.worldBuildingDB,
-    chapterSummaries: project.chapterSummaries || []
+    chapterSummaries: Array.isArray(project.chapterSummaries) ? project.chapterSummaries : [],
+    arcSummaries: Array.isArray(project.arcSummaries) ? project.arcSummaries : [],
+    currentArcSummary: project.currentArcSummary || '',
+    currentArcName: project.currentArcName || '',
+    currentArcStart: project.currentArcStart || 1,
+    currentArcEnd: project.currentArcEnd || null,
+    globalArcsSummary: project.globalArcsSummary || '',
+    memoryMigrated: project.memoryMigrated || false
   }
 
-  // 1. 生成本章结构化摘要（v3：每章独立 JSON 条目）
-  onProgress('正在生成章节摘要...', 1, 5)
+  // 0. 旧摘要迁移：已有项目如果只有 globalSummary，先拆入 v3 分章/弧结构。
+  if (!results.memoryMigrated && results.chapterSummaries.length === 0 && project.globalSummary && chapterNumber > 1) {
+    onProgress('正在迁移旧摘要...', 1, 6)
+    try {
+      const migrationResponse = await chatCompletion(apiConfig, migrateOldSummary({
+        oldSummary: project.globalSummary,
+        currentChapter: chapterNumber - 1
+      }))
+      const migrated = parseJsonResponse(migrationResponse)
+
+      if (migrated) {
+        if (Array.isArray(migrated.chapterSummaries)) {
+          results.chapterSummaries = migrated.chapterSummaries
+            .map(summary => normalizeChapterSummary(summary))
+            .filter(Boolean)
+            .sort((a, b) => Number(a.chapter) - Number(b.chapter))
+        }
+        if (Array.isArray(migrated.arcSummaries)) {
+          results.arcSummaries = migrated.arcSummaries
+            .map((arc, index) => ({
+              id: arc.id || `arc-${arc.startChapter || index + 1}`,
+              name: arc.name || `剧情弧 ${index + 1}`,
+              startChapter: Number.parseInt(arc.startChapter || arc.start || 1, 10),
+              endChapter: Number.parseInt(arc.endChapter || arc.end || arc.startChapter || 1, 10),
+              summary: arc.summary || arc.description || '',
+              updatedAt: new Date().toISOString()
+            }))
+            .filter(arc => Number.isFinite(arc.startChapter))
+            .sort((a, b) => a.startChapter - b.startChapter)
+        }
+        results.globalArcsSummary = migrated.globalSummary || buildGlobalArcsSummary(results.arcSummaries)
+      }
+      results.memoryMigrated = true
+    } catch (e) {
+      console.error('旧摘要迁移失败，继续使用现有摘要:', e)
+    }
+  }
+
+  // 1. 单次提取本章事实包，并在本地合并到各类记忆库。
+  onProgress('正在提取章节事实...', 2, 6)
   try {
     const previousChapterSummary = results.chapterSummaries.length > 0
       ? JSON.stringify(results.chapterSummaries[results.chapterSummaries.length - 1])
       : ''
-    
-    const summaryResponse = cleanResponse(await chatCompletion(apiConfig, generateChapterSummary({
+    const chapterOutline = getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
+
+    const factsResponse = await chatCompletion(apiConfig, extractChapterFacts({
       chapterText,
       chapterNumber,
       previousChapterSummary,
-      arcSummary: project.currentArcSummary || '',
-      chapterOutline: getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
-    })))
-    
-    // 解析 JSON 响应
-    const summaryJson = JSON.parse(summaryResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim())
-    results.chapterSummaries = [...results.chapterSummaries, summaryJson]
-    
-    // 同时更新兼容旧版的 globalSummary（纯文本格式）
-    const summaryText = `第${chapterNumber}章「${summaryJson.title}」：${summaryJson.summary}`
-    results.globalSummary = project.globalSummary
-      ? `${project.globalSummary}\n\n${summaryText}`
-      : summaryText
+      arcSummary: results.currentArcSummary || '',
+      chapterOutline,
+      currentCharacterDB: results.characterDB || '{"characters": [], "relationships": []}',
+      currentForeshadowingDB: results.foreshadowingDB || '{"foreshadowing": []}',
+      currentWorldDB: results.worldBuildingDB || '{"entries": []}'
+    }))
+    const chapterFacts = parseJsonResponse(factsResponse)
+    if (!chapterFacts) throw new Error('章节事实 JSON 解析失败')
+
+    const summaryJson = normalizeChapterSummary(chapterFacts.chapterSummary, chapterNumber)
+    if (summaryJson) {
+      results.chapterSummaries = upsertChapterSummary(results.chapterSummaries, summaryJson)
+    }
+
+    onProgress('正在合并章节事实...', 3, 6)
+    const characterDB = mergeCharacterDB(results.characterDB, chapterFacts, chapterNumber)
+    results.characterDB = JSON.stringify(characterDB, null, 2)
+    results.characterState = buildCharacterStateFromDB(characterDB, project.characterState)
+
+    const foreshadowingDB = mergeForeshadowingDB(results.foreshadowingDB, chapterFacts, chapterNumber)
+    results.foreshadowingDB = JSON.stringify(foreshadowingDB, null, 2)
+
+    const worldBuildingDB = mergeWorldBuildingDB(results.worldBuildingDB, chapterFacts, chapterNumber)
+    results.worldBuildingDB = JSON.stringify(worldBuildingDB, null, 2)
   } catch (e) {
-    console.error('章节摘要生成失败:', e)
-    // 降级：使用旧版摘要方式
+    console.error('章节事实提取失败，降级到旧版多步更新:', e)
     try {
-      const { summary: legacySummaryPrompt } = utilityPrompts
-      const legacySummary = cleanResponse(await chatCompletion(apiConfig, legacySummaryPrompt({
+      const previousChapterSummary = results.chapterSummaries.length > 0
+        ? JSON.stringify(results.chapterSummaries[results.chapterSummaries.length - 1])
+        : ''
+      const summaryResponse = cleanResponse(await chatCompletion(apiConfig, generateChapterSummary({
         chapterText,
-        globalSummary: project.globalSummary || ''
+        chapterNumber,
+        previousChapterSummary,
+        arcSummary: results.currentArcSummary || '',
+        chapterOutline: getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
       })))
-      results.globalSummary = legacySummary || project.globalSummary
+      const summaryJson = normalizeChapterSummary(parseJsonResponse(summaryResponse), chapterNumber)
+      if (summaryJson) {
+        results.chapterSummaries = upsertChapterSummary(results.chapterSummaries, summaryJson)
+      }
+
+      const charDBResponse = cleanResponse(await chatCompletion(apiConfig, updateCharacterDB({
+        chapterText,
+        currentCharacterDB: results.characterDB || '{"characters": [], "relationships": []}',
+        chapterNumber
+      })))
+      results.characterDB = JSON.stringify(parseJsonResponse(charDBResponse, parseJsonDb(results.characterDB, { characters: [], relationships: [] })), null, 2)
+      results.characterState = buildCharacterStateFromDB(results.characterDB, project.characterState)
+
+      const foreshadowingResponse = cleanResponse(await chatCompletion(apiConfig, updateForeshadowingDB({
+        chapterText,
+        currentForeshadowingDB: results.foreshadowingDB || '{"foreshadowing": []}',
+        chapterNumber
+      })))
+      results.foreshadowingDB = JSON.stringify(parseJsonResponse(foreshadowingResponse, parseJsonDb(results.foreshadowingDB, { foreshadowing: [] })), null, 2)
+
+      const worldResponse = cleanResponse(await chatCompletion(apiConfig, updateWorldBuildingDB({
+        chapterText,
+        currentWorldDB: results.worldBuildingDB || '{"entries": []}',
+        chapterNumber
+      })))
+      results.worldBuildingDB = JSON.stringify(parseJsonResponse(worldResponse, parseJsonDb(results.worldBuildingDB, { entries: [] })), null, 2)
     } catch (e2) {
-      console.error('降级摘要也失败:', e2)
+      console.error('旧版多步记忆更新也失败:', e2)
     }
   }
 
-  // 2. 更新角色数据库（v3：JSON 结构化存储）
-  onProgress('正在更新角色数据库...', 2, 5)
+  // 2. 维护弧/卷级摘要：当前弧持续更新，弧结束后归档并生成跨弧摘要。
+  onProgress('正在更新弧摘要...', 4, 6)
   try {
-    const charDBResponse = cleanResponse(await chatCompletion(apiConfig, updateCharacterDB({
-      chapterText,
-      currentCharacterDB: project.characterDB || '{"characters": [], "relationships": []}',
-      chapterNumber
-    })))
-    results.characterDB = charDBResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    // 同时更新兼容旧版的 characterState（纯文本格式）
-    try {
-      const db = JSON.parse(results.characterDB)
-      const stateLines = (db.characters || [])
-        .filter(c => c.status === 'active' && c.importance >= 4)
-        .map(c => {
-          const parts = [`【${c.name}】${c.currentState?.physical || ''} ${c.currentState?.mental || ''}`]
-          if (c.abilities?.length) parts.push(`  能力：${c.abilities.map(a => `${a.name}(${a.level})`).join('、')}`)
-          if (c.goals?.shortTerm) parts.push(`  目标：${c.goals.shortTerm}`)
-          return parts.join('\n')
+    const { start: arcStart, end: arcEnd } = getArcRange(project, chapterNumber)
+    const currentArcName = getArcName(project, arcStart, arcEnd)
+    const currentArcChapterSummaries = results.chapterSummaries
+      .filter(summary => Number(summary.chapter) >= arcStart && Number(summary.chapter) <= chapterNumber)
+
+    if (currentArcChapterSummaries.length > 0) {
+      const previousArcsSummary = results.globalArcsSummary || buildGlobalArcsSummary(results.arcSummaries)
+      const arcSummary = cleanResponse(await chatCompletion(apiConfig, generateArcSummary({
+        chapterSummaries: currentArcChapterSummaries,
+        currentArcName,
+        currentArcStart: arcStart,
+        currentArcEnd: chapterNumber,
+        previousArcsSummary
+      })))
+
+      const isArcComplete = chapterNumber >= arcEnd || chapterNumber >= Number(project.numberOfChapters || Infinity)
+      if (isArcComplete) {
+        results.arcSummaries = upsertArcSummary(results.arcSummaries, {
+          id: `arc-${arcStart}-${chapterNumber}`,
+          name: currentArcName,
+          startChapter: arcStart,
+          endChapter: chapterNumber,
+          summary: arcSummary,
+          updatedAt: new Date().toISOString()
         })
-      results.characterState = stateLines.join('\n\n') || project.characterState
-    } catch (e) {
-      // JSON 解析失败，保留原 characterState
+        results.globalArcsSummary = buildGlobalArcsSummary(results.arcSummaries)
+        results.currentArcSummary = ''
+        results.currentArcName = ''
+        results.currentArcStart = chapterNumber + 1
+        results.currentArcEnd = null
+      } else {
+        results.currentArcSummary = arcSummary
+        results.currentArcName = currentArcName
+        results.currentArcStart = arcStart
+        results.currentArcEnd = arcEnd
+        results.globalArcsSummary = previousArcsSummary
+      }
     }
   } catch (e) {
-    console.error('角色数据库更新失败:', e)
+    console.error('弧摘要更新失败:', e)
   }
 
-  // 3. 更新伏笔数据库（v3：独立追踪系统）
-  onProgress('正在更新伏笔数据库...', 3, 5)
+  // 3. 更新兼容旧版的 globalSummary，但只保留跨弧摘要 + 当前弧 + 最近章节，避免无限累积。
+  onProgress('正在压缩记忆摘要...', 5, 6)
   try {
-    const foreshadowingResponse = cleanResponse(await chatCompletion(apiConfig, updateForeshadowingDB({
-      chapterText,
-      currentForeshadowingDB: project.foreshadowingDB || '{"foreshadowing": []}',
-      chapterNumber
-    })))
-    results.foreshadowingDB = foreshadowingResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    results.globalSummary = buildCompatibilitySummary({
+      chapterSummaries: results.chapterSummaries,
+      currentArcSummary: results.currentArcSummary,
+      globalArcsSummary: results.globalArcsSummary
+    }) || results.globalSummary
+
+    if (estimateTokens(results.globalSummary) > GLOBAL_SUMMARY_TOKEN_LIMIT) {
+      results.globalSummary = cleanResponse(await chatCompletion(apiConfig, compressGlobalSummary({
+        globalSummary: results.globalSummary,
+        maxChars: 6000
+      })))
+    }
+
+    if (estimateTokens(results.globalArcsSummary) > GLOBAL_SUMMARY_TOKEN_LIMIT) {
+      results.globalArcsSummary = cleanResponse(await chatCompletion(apiConfig, compressGlobalSummary({
+        globalSummary: results.globalArcsSummary,
+        maxChars: 5000
+      })))
+    }
   } catch (e) {
-    console.error('伏笔数据库更新失败:', e)
+    console.error('摘要压缩失败:', e)
   }
 
-  // 4. 更新世界观数据库（v3：独立词条系统）
-  onProgress('正在更新世界观数据库...', 4, 5)
-  try {
-    const worldResponse = cleanResponse(await chatCompletion(apiConfig, updateWorldBuildingDB({
-      chapterText,
-      currentWorldDB: project.worldBuildingDB || '{"entries": []}',
-      chapterNumber
-    })))
-    results.worldBuildingDB = worldResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-  } catch (e) {
-    console.error('世界观数据库更新失败:', e)
-  }
-
-  onProgress('章节定稿完成', 5, 5)
+  onProgress('章节定稿完成', 6, 6)
 
   return results
 }

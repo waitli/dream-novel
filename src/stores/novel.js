@@ -39,9 +39,13 @@ export const useNovelStore = defineStore('novel', () => {
       foreshadowingDB: '',      // 伏笔数据库（JSON）
       worldBuildingDB: '',      // 世界观数据库（JSON）
       chapterSummaries: [],     // 分章摘要数组
+      arcSummaries: [],         // 已归档弧/卷摘要数组
       currentArcSummary: '',    // 当前弧汇总摘要
       currentArcName: '',       // 当前弧名称
       currentArcStart: 1,       // 当前弧起始章节
+      currentArcEnd: null,      // 当前弧结束章节
+      globalArcsSummary: '',    // 跨弧极简摘要
+      memoryMigrated: false,    // 旧摘要是否已迁移到 v3 结构
       // Graph data - 关系图谱数据
       graphData: {
         version: 1,
