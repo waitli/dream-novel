@@ -139,6 +139,8 @@ export default {
     apiKeyPlaceholder: '请输入 API Key',
     defaultModel: '默认模型',
     modelHint: '未单独配置环节模型时使用此模型',
+    maxTokens: '最大输出 Tokens',
+    maxTokensPlaceholder: '建议 DeepSeek V4 使用 32768 或更高',
     stageModels: '各环节模型配置',
     stageModelsHint: '留空则使用默认模型',
     getApiKey: '获取 Key',

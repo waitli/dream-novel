@@ -75,10 +75,14 @@ const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, wo
 // 使用 v3 三层记忆架构 prompts
 const chapterPromptsToUse = chapterPromptsOptimized
 
-const { blueprint: chapterBlueprintPrompt, blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
+const { blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
 
 const DEFAULT_ARC_SIZE = 10
 const GLOBAL_SUMMARY_TOKEN_LIMIT = 4500
+const BLUEPRINT_RETRY_LIMIT = 3
+const BLUEPRINT_MIN_CHUNK_SIZE = 3
+const BLUEPRINT_SAFE_CHUNK_SIZE = 8
+const BLUEPRINT_LARGE_OUTPUT_CHUNK_SIZE = 15
 
 function formatGenre(genre) {
   if (Array.isArray(genre)) return genre.join(' / ')
@@ -186,100 +190,85 @@ ${project.worldBuilding}
 ${project.plotArchitecture}
 `
 
-  // Calculate chunk size based on max tokens - 根据最大 token 数计算分块大小
-  // 修改：降低每批章节数，从 30 章降至 20 章，减少生成失败概率
-  const tokensPerChapter = 200
-  const maxTokens = apiConfig.maxTokens || 8192
-  let chunkSize = Math.floor(maxTokens / tokensPerChapter / 10) * 10 - 10
-  // 限制最大 chunkSize 为 20 章/批，防止生成不完整
-  chunkSize = Math.max(1, Math.min(chunkSize, 20, numberOfChapters))
+  const totalChapters = Number.parseInt(numberOfChapters, 10)
+  if (!Number.isFinite(totalChapters) || totalChapters <= 0) {
+    throw new Error('章节数量无效，无法生成章节大纲')
+  }
 
-  let blueprintData = getProjectBlueprintChapters(project)
-  
-  // Use structured blueprint as source of truth - 以结构化大纲为主数据
-  const maxExistingChapter = blueprintData.length > 0
-    ? Math.max(...blueprintData.map(chapter => chapter.number))
-    : 0
+  const chunkSize = getBlueprintChunkSize(apiConfig, totalChapters)
+  let blueprintData = filterBlueprintChaptersInRange(getProjectBlueprintChapters(project), totalChapters)
+  let missingChapters = getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters)
+  const ranges = createBlueprintGenerationRanges(missingChapters, chunkSize)
 
-  let currentStart = maxExistingChapter + 1
+  if (ranges.length === 0) {
+    onProgress('章节大纲已完整，无需补充生成', totalChapters, totalChapters)
+  }
 
-  if (chunkSize >= numberOfChapters && blueprintData.length === 0) {
-    // Single shot generation - 一次性生成
-    onProgress(getProgressText('generatingChapterBlueprint') + ` (1-${numberOfChapters})...`, 0, 1)
-    const prompt = chapterBlueprintPrompt({
-      userGuidance,
-      novelArchitecture,
-      numberOfChapters
-    })
-    const response = cleanResponse(await chatCompletion(apiConfig, prompt))
-    blueprintData = parseChapterBlueprint(response)
-    
-    // 验证生成数量
-    const generatedCount = blueprintData.length
-    if (generatedCount < numberOfChapters) {
-      console.warn(`大纲生成不完整：期望${numberOfChapters}章，实际${generatedCount}章`)
-    }
-  } else {
-    // Chunked generation - 分块生成（带验证和重试）
-    while (currentStart <= numberOfChapters) {
-      const currentEnd = Math.min(currentStart + chunkSize - 1, numberOfChapters)
-      const expectedCount = currentEnd - currentStart + 1
+  for (const range of ranges) {
+    const { start, end } = range
+    const expectedCount = end - start + 1
+    let acceptedChapters = []
+    let lastValidation = null
+
+    for (let attempt = 1; attempt <= BLUEPRINT_RETRY_LIMIT; attempt++) {
+      const progressCurrent = totalChapters - getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters).length
+      const retryLabel = attempt > 1 ? `，第 ${attempt}/${BLUEPRINT_RETRY_LIMIT} 次重试` : ''
       onProgress(
-        getProgressText('generatingChapterBlueprintChunk') + ` (${currentStart}-${currentEnd})...`,
-        currentStart - 1,
-        numberOfChapters
+        getProgressText('generatingChapterBlueprintChunk') + ` (${start}-${end})${retryLabel}...`,
+        progressCurrent,
+        totalChapters
       )
 
-      // Limit existing blueprint context to recent chapters - 限制已有大纲上下文到最近章节
       const limitedBlueprint = limitChapterBlueprintData(blueprintData, 100)
-
       const prompt = chunkedChapterBlueprintPrompt({
         userGuidance,
         novelArchitecture,
-        numberOfChapters,
+        numberOfChapters: totalChapters,
         chapterList: limitedBlueprint,
-        startChapter: currentStart,
-        endChapter: currentEnd
+        startChapter: start,
+        endChapter: end
       })
 
       const chunkResult = cleanResponse(await chatCompletion(apiConfig, prompt))
-      
-      if (chunkResult) {
-        // 验证本块生成的章节数量
-        const chunkChapters = parseChapterBlueprint(chunkResult)
-        const actualCount = chunkChapters.length
-        if (actualCount < expectedCount) {
-          console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
-          // 尝试重试一次
-          onProgress(getProgressText('generationIncomplete', { actual: actualCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
-          const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
-          const retryChapters = parseChapterBlueprint(retryResult)
-          const retryCount = retryChapters.length
-          if (retryCount > actualCount) {
-            blueprintData = mergeBlueprintChapters(blueprintData, retryChapters)
-            onProgress(getProgressText('retrySuccess', { count: retryCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
-          } else {
-            blueprintData = mergeBlueprintChapters(blueprintData, chunkChapters)
-            onProgress(`⚠️ 重试未改善：${actualCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
-          }
-        } else {
-          blueprintData = mergeBlueprintChapters(blueprintData, chunkChapters)
-        }
+      const chunkChapters = parseChapterBlueprint(chunkResult)
+      const validation = validateBlueprintChunk(chunkChapters, start, end)
+      lastValidation = validation
+
+      if (validation.isValid) {
+        acceptedChapters = validation.chapters
+        blueprintData = mergeBlueprintChapters(blueprintData, acceptedChapters)
+        onProgress(
+          `✓ 已生成第 ${start}-${end} 章大纲 (${acceptedChapters.length}/${expectedCount})`,
+          totalChapters - getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters).length,
+          totalChapters
+        )
+        break
       }
 
-      currentStart = currentEnd + 1
+      console.warn(`第${start}-${end}章大纲生成不完整：`, validation)
+      onProgress(
+        getProgressText('generationIncomplete', { actual: validation.validCount, expected: expectedCount }),
+        progressCurrent,
+        totalChapters
+      )
+    }
+
+    if (acceptedChapters.length === 0) {
+      throw new Error(createBlueprintChunkErrorMessage(start, end, lastValidation))
     }
   }
 
   // 最终验证
-  blueprintData = parseChapterBlueprint(blueprintData)
-  const finalCount = blueprintData.length
-  if (finalCount < numberOfChapters) {
-    console.error(`大纲生成完成但数量不足：期望${numberOfChapters}章，实际${finalCount}章`)
-    onProgress(`⚠️ 大纲生成不完整：${finalCount}/${numberOfChapters}章`, numberOfChapters, numberOfChapters)
-  } else {
-    onProgress('章节大纲生成完成!', numberOfChapters, numberOfChapters)
+  blueprintData = filterBlueprintChaptersInRange(blueprintData, totalChapters)
+  missingChapters = getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters)
+  if (missingChapters.length > 0) {
+    const message = `大纲生成未完成，缺失或字段为空的章节：${formatChapterRanges(missingChapters)}`
+    console.error(message)
+    onProgress(`⚠️ ${message}`, totalChapters - missingChapters.length, totalChapters)
+    throw new Error(message)
   }
+
+  onProgress('章节大纲生成完成!', totalChapters, totalChapters)
   
   return {
     chapterBlueprintData: blueprintData,
@@ -290,6 +279,162 @@ ${project.plotArchitecture}
 /**
  * Limit chapter blueprint to recent chapters - 限制章节大纲到最近章节
  */
+function getBlueprintChunkSize(apiConfig, totalChapters) {
+  const maxTokens = Number.parseInt(apiConfig?.maxTokens, 10) || 8192
+  const estimatedTokensPerChapter = 1200
+  const tokenBasedSize = Math.floor(maxTokens / estimatedTokensPerChapter)
+  const maxChunkSize = maxTokens >= 32000 ? BLUEPRINT_LARGE_OUTPUT_CHUNK_SIZE : BLUEPRINT_SAFE_CHUNK_SIZE
+  return Math.max(
+    1,
+    Math.min(
+      totalChapters,
+      maxChunkSize,
+      Math.max(BLUEPRINT_MIN_CHUNK_SIZE, tokenBasedSize || BLUEPRINT_MIN_CHUNK_SIZE)
+    )
+  )
+}
+
+function filterBlueprintChaptersInRange(chapters, totalChapters) {
+  return parseChapterBlueprint(chapters)
+    .filter(chapter => chapter.number >= 1 && chapter.number <= totalChapters)
+}
+
+function hasRequiredBlueprintFields(chapter) {
+  return Boolean(chapter?.title?.trim() && chapter?.summary?.trim())
+}
+
+function getMissingOrIncompleteBlueprintChapters(chapters, totalChapters) {
+  const byNumber = new Map(filterBlueprintChaptersInRange(chapters, totalChapters).map(chapter => [chapter.number, chapter]))
+  const missing = []
+
+  for (let number = 1; number <= totalChapters; number++) {
+    const chapter = byNumber.get(number)
+    if (!chapter || !hasRequiredBlueprintFields(chapter)) {
+      missing.push(number)
+    }
+  }
+
+  return missing
+}
+
+function createBlueprintGenerationRanges(chapterNumbers, chunkSize) {
+  const numbers = [...new Set(chapterNumbers)].sort((a, b) => a - b)
+  const ranges = []
+  let index = 0
+
+  while (index < numbers.length) {
+    const start = numbers[index]
+    let end = start
+    let count = 1
+    index++
+
+    while (index < numbers.length && numbers[index] === end + 1 && count < chunkSize) {
+      end = numbers[index]
+      count++
+      index++
+    }
+
+    ranges.push({ start, end })
+  }
+
+  return ranges
+}
+
+function validateBlueprintChunk(chapters, startChapter, endChapter) {
+  const parsed = parseChapterBlueprint(chapters)
+  const rangeChapters = parsed.filter(chapter => chapter.number >= startChapter && chapter.number <= endChapter)
+  const invalidNumbers = parsed
+    .filter(chapter => chapter.number < startChapter || chapter.number > endChapter)
+    .map(chapter => chapter.number)
+  const duplicateNumbers = getDuplicateChapterNumbers(rangeChapters)
+  const byNumber = new Map(rangeChapters.map(chapter => [chapter.number, chapter]))
+  const missingNumbers = []
+  const incompleteNumbers = []
+
+  for (let number = startChapter; number <= endChapter; number++) {
+    const chapter = byNumber.get(number)
+    if (!chapter) {
+      missingNumbers.push(number)
+    } else if (!hasRequiredBlueprintFields(chapter)) {
+      incompleteNumbers.push(number)
+    }
+  }
+
+  return {
+    isValid: missingNumbers.length === 0 && incompleteNumbers.length === 0 && invalidNumbers.length === 0 && duplicateNumbers.length === 0,
+    chapters: [...byNumber.values()].sort((a, b) => a.number - b.number),
+    validCount: byNumber.size - incompleteNumbers.length,
+    missingNumbers,
+    incompleteNumbers,
+    invalidNumbers,
+    duplicateNumbers
+  }
+}
+
+function getDuplicateChapterNumbers(chapters) {
+  const seen = new Set()
+  const duplicates = new Set()
+
+  for (const chapter of chapters) {
+    if (seen.has(chapter.number)) {
+      duplicates.add(chapter.number)
+    }
+    seen.add(chapter.number)
+  }
+
+  return [...duplicates].sort((a, b) => a - b)
+}
+
+function formatChapterRanges(chapterNumbers, limit = 40) {
+  const numbers = [...new Set(chapterNumbers)].sort((a, b) => a - b)
+  const visible = numbers.slice(0, limit)
+  const ranges = []
+  let start = null
+  let previous = null
+
+  for (const number of visible) {
+    if (start === null) {
+      start = number
+      previous = number
+    } else if (number === previous + 1) {
+      previous = number
+    } else {
+      ranges.push(start === previous ? `${start}` : `${start}-${previous}`)
+      start = number
+      previous = number
+    }
+  }
+
+  if (start !== null) {
+    ranges.push(start === previous ? `${start}` : `${start}-${previous}`)
+  }
+
+  const suffix = numbers.length > limit ? ` 等 ${numbers.length} 章` : ''
+  return `${ranges.join('、')}${suffix}`
+}
+
+function createBlueprintChunkErrorMessage(startChapter, endChapter, validation) {
+  if (!validation) {
+    return `第 ${startChapter}-${endChapter} 章大纲生成失败：模型未返回可解析内容`
+  }
+
+  const details = []
+  if (validation.missingNumbers.length > 0) {
+    details.push(`缺失 ${formatChapterRanges(validation.missingNumbers)}`)
+  }
+  if (validation.incompleteNumbers.length > 0) {
+    details.push(`标题或简述为空 ${formatChapterRanges(validation.incompleteNumbers)}`)
+  }
+  if (validation.invalidNumbers.length > 0) {
+    details.push(`编号超出范围 ${formatChapterRanges(validation.invalidNumbers)}`)
+  }
+  if (validation.duplicateNumbers.length > 0) {
+    details.push(`编号重复 ${formatChapterRanges(validation.duplicateNumbers)}`)
+  }
+
+  return `第 ${startChapter}-${endChapter} 章大纲生成失败：${details.join('；') || '返回结构不完整'}`
+}
+
 function limitChapterBlueprint(blueprint, limit) {
   if (!blueprint) return ''
   

@@ -3,7 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { useMessage } from 'naive-ui'
-import { NModal, NCard, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NTooltip, NTabs, NTabPane, NSelect, NAutoComplete } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSpace, NIcon, NTooltip, NSelect, NAutoComplete } from 'naive-ui'
 import { HelpCircleOutline } from '@vicons/ionicons5'
 
 const props = defineProps({
@@ -22,7 +22,10 @@ const channels = [
     id: 'chatfire', 
     name: 'Chatfire',
     baseUrl: 'https://api.chatfire.site/v1',
+    defaultMaxTokens: 8192,
     models: [
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
       'gemini-3-flash-preview',
       'doubao-seed-1-8-251228',
       'gemini-3-pro-preview',
@@ -36,6 +39,7 @@ const channels = [
     id: 'openai', 
     name: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
+    defaultMaxTokens: 8192,
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'],
     getApiKeyUrl: 'https://platform.openai.com/api-keys'
   },
@@ -43,6 +47,7 @@ const channels = [
     id: 'gemini', 
     name: 'Google Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    defaultMaxTokens: 8192,
     models: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
     getApiKeyUrl: 'https://aistudio.google.com/app/apikey'
   },
@@ -50,6 +55,7 @@ const channels = [
     id: 'anthropic',
     name: 'Anthropic Claude',
     baseUrl: 'https://api.anthropic.com/v1',
+    defaultMaxTokens: 8192,
     models: ['claude-sonnet-4-5-20250929', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
     getApiKeyUrl: 'https://console.anthropic.com/settings/keys',
     isClaude: true
@@ -58,6 +64,7 @@ const channels = [
     id: 'azure',
     name: 'Azure OpenAI',
     baseUrl: 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}',
+    defaultMaxTokens: 8192,
     models: ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
     getApiKeyUrl: 'https://portal.azure.com/',
     isAzure: true
@@ -66,20 +73,23 @@ const channels = [
     id: 'moonshot',
     name: 'Moonshot Kimi',
     baseUrl: 'https://api.moonshot.cn/v1',
+    defaultMaxTokens: 8192,
     models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
     getApiKeyUrl: 'https://platform.moonshot.cn/console/api-keys'
   },
   {
     id: 'deepseek',
     name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-coder'],
+    baseUrl: 'https://api.deepseek.com',
+    defaultMaxTokens: 32768,
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder'],
     getApiKeyUrl: 'https://platform.deepseek.com/api_keys'
   },
   {
     id: 'baichuan',
     name: 'Baichuan AI',
     baseUrl: 'https://api.baichuan-ai.com/v1',
+    defaultMaxTokens: 8192,
     models: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan2-Turbo'],
     getApiKeyUrl: 'https://platform.baichuan-ai.com/console/apikey'
   },
@@ -87,6 +97,7 @@ const channels = [
     id: 'zhipu',
     name: 'Zhipu AI',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultMaxTokens: 8192,
     models: ['glm-4', 'glm-4-air', 'glm-3-turbo'],
     getApiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
   },
@@ -94,6 +105,7 @@ const channels = [
     id: 'custom',
     name: 'Custom API',
     baseUrl: '',
+    defaultMaxTokens: 8192,
     models: [],
     getApiKeyUrl: '',
     isCustom: true
@@ -101,7 +113,7 @@ const channels = [
 ]
 
 // Current channel
-const currentChannel = ref('chatfire')
+const currentChannel = ref('deepseek')
 
 // Channel options for select
 const channelOptions = computed(() => channels.map(c => ({ label: c.name, value: c.id })))
@@ -114,12 +126,12 @@ const currentChannelModels = computed(() => {
 
 // Initialize with default values
 const localConfig = ref({
-  channel: 'chatfire',
-  baseUrl: 'https://api.chatfire.site/v1',
+  channel: 'deepseek',
+  baseUrl: 'https://api.deepseek.com',
   apiKey: '',
-  model: 'gemini-3-flash-preview',
+  model: 'deepseek-v4-flash',
   temperature: 0.7,
-  maxTokens: 8192,
+  maxTokens: 32768,
   timeout: 600
 })
 
@@ -140,6 +152,7 @@ function handleChannelChange(channelId) {
       localConfig.value.baseUrl = channel.baseUrl
     }
     localConfig.value.model = channel.models[0] || ''
+    localConfig.value.maxTokens = channel.defaultMaxTokens || 8192
   }
 }
 
@@ -172,7 +185,7 @@ watch(() => props.modelValue, (val) => {
   if (val) {
     localConfig.value = { ...settings.apiConfig }
     localStageModels.value = { ...settings.stageModels }
-    currentChannel.value = localConfig.value.channel || 'chatfire'
+    currentChannel.value = localConfig.value.channel || 'deepseek'
   }
 }, { immediate: true })
 
@@ -293,6 +306,18 @@ function saveSettings() {
           :get-show="() => true"
           :placeholder="t('settings.defaultModel')"
           clearable
+        />
+      </n-form-item>
+
+      <!-- Max Tokens -->
+      <n-form-item :label="t('settings.maxTokens')">
+        <n-input-number
+          v-model:value="localConfig.maxTokens"
+          :min="1024"
+          :max="384000"
+          :step="1024"
+          class="w-full"
+          :placeholder="t('settings.maxTokensPlaceholder')"
         />
       </n-form-item>
 

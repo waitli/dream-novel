@@ -22,12 +22,12 @@ function isEnglish() {
  * 
  * 文件来源：https://github.com/waitli/dream-novel/blob/main/src/prompts/chapter-optimized.js
  * 修改时间：2026-03-22
- * 修改内容：降低大纲详细度要求（200-300 字 → 100-150 字）
+ * 修改内容：降低大纲详细度要求，长篇按小批次输出结构化 JSON
  */
 
 /**
  * 详细章节大纲提示词（一次性生成）
- * 每章 100-150 字详细大纲（降低要求，确保能生成）
+ * 每章简述保持短句，详细展开交给章节写作阶段
  */
 export const blueprint = (params) => {
   if (isEnglish()) {

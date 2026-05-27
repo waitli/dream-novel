@@ -2,7 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, watch, computed } from 'vue'
 
 // Default model config - 默认模型配置
-const DEFAULT_MODEL = 'gemini-3-flash-preview'
+const DEFAULT_CHANNEL = 'deepseek'
+const DEFAULT_BASE_URL = 'https://api.deepseek.com'
+const DEFAULT_MODEL = 'deepseek-v4-flash'
+const DEFAULT_MAX_TOKENS = 32768
 
 // Default locale - 默认语言
 const DEFAULT_LOCALE = localStorage.getItem('locale') || 'zh-CN'
@@ -16,12 +19,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const locale = ref(localStorage.getItem('locale') || 'zh-CN')
   
   const apiConfig = ref(JSON.parse(localStorage.getItem('api_config') || JSON.stringify({
-    channel: 'chatfire',
-    baseUrl: 'https://api.chatfire.site/v1',
+    channel: DEFAULT_CHANNEL,
+    baseUrl: DEFAULT_BASE_URL,
     apiKey: '',
     model: DEFAULT_MODEL,
     temperature: 0.7,
-    maxTokens: 8192,
+    maxTokens: DEFAULT_MAX_TOKENS,
     timeout: 600,
     // Azure 配置
     resourceName: '',

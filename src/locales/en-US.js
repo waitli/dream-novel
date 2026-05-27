@@ -139,6 +139,8 @@ export default {
     apiKeyPlaceholder: 'Please enter API Key',
     defaultModel: 'Default Model',
     modelHint: 'Used when stage-specific models are not configured',
+    maxTokens: 'Max Output Tokens',
+    maxTokensPlaceholder: 'Use 32768 or higher for DeepSeek V4',
     stageModels: 'Stage-specific Models',
     stageModelsHint: 'Leave empty to use default model',
     getApiKey: 'Get API Key',
