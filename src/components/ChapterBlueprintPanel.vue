@@ -1,8 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { useNovelStore } from '../stores/novel'
 import { useI18n } from '../i18n'
-import { parseChapterBlueprint } from '../api/generator'
+import { formatChapterBlueprintMarkdown } from '../api/generator'
 import { NButton, NInput, NTag, NIcon, NRadioGroup, NRadioButton } from 'naive-ui'
 import { WarningOutline, ListOutline, PlayOutline, RefreshOutline, GridOutline, DocumentTextOutline, SearchOutline, GitNetworkOutline } from '@vicons/ionicons5'
 
@@ -14,7 +13,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['generate', 'regenerate'])
-const novelStore = useNovelStore()
 const { t } = useI18n()
 
 // View mode
@@ -40,13 +38,9 @@ function getTwistStars(level) {
   return level
 }
 
-// Update raw blueprint
-function updateBlueprint(value) {
-  novelStore.updateProject(props.project.id, {
-    chapterBlueprint: value,
-    chapterBlueprintData: parseChapterBlueprint(value)
-  })
-}
+const displayBlueprint = computed(() => {
+  return props.project?.chapterBlueprint || formatChapterBlueprintMarkdown(props.chapters || [])
+})
 </script>
 
 <template>
@@ -68,8 +62,8 @@ function updateBlueprint(value) {
     </div>
 
     <!-- Generate button area -->
-    <div 
-      v-else-if="!project.chapterBlueprint" 
+    <div
+      v-else-if="!project.chapterBlueprint && !project.chapterBlueprintData?.length"
       class="bg-white dark:bg-[#1f1f23] rounded-2xl p-12 border border-gray-200/80 dark:border-gray-700/50 text-center"
     >
       <div class="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-xl shadow-purple-500/25">
@@ -210,8 +204,8 @@ function updateBlueprint(value) {
       <div v-else-if="viewMode === 'raw'" class="bg-white dark:bg-[#1f1f23] rounded-xl border border-gray-200/80 dark:border-gray-700/50">
         <n-input
           type="textarea"
-          :value="project.chapterBlueprint"
-          @update:value="updateBlueprint"
+          :value="displayBlueprint"
+          readonly
           :autosize="{ minRows: 20, maxRows: 50 }"
           class="novel-textarea"
         />

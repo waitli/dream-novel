@@ -118,8 +118,12 @@ export async function auditCompassGraph(project, apiConfig, onProgress) {
     return `--- 第 ${k} 章快照 ---\n节点: ${s.nodes.map(n => `${n.label}(${n.status})`).join(', ')}\n关系: ${s.edges.map(e => `${e.source}-[${e.relationType}]-${e.target}`).join(', ')}`
   }).join('\n\n')
 
+  const chapterBlueprint = project.chapterBlueprintData?.length
+    ? JSON.stringify({ chapters: project.chapterBlueprintData }, null, 2)
+    : project.chapterBlueprint || '(暂无大纲)'
+
   const prompt = auditGraphPrompt({
-    chapterBlueprint: project.chapterBlueprint || '(暂无大纲)',
+    chapterBlueprint,
     snapshotsText
   })
 

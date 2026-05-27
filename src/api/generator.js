@@ -194,17 +194,16 @@ ${project.plotArchitecture}
   // 限制最大 chunkSize 为 20 章/批，防止生成不完整
   chunkSize = Math.max(1, Math.min(chunkSize, 20, numberOfChapters))
 
-  let blueprint = project.chapterBlueprint || ''
+  let blueprintData = getProjectBlueprintChapters(project)
   
-  // Parse existing chapters - 解析已有章节
-  const existingChapters = parseChapterBlueprint(blueprint)
-  const maxExistingChapter = existingChapters.length > 0
-    ? Math.max(...existingChapters.map(chapter => chapter.number))
+  // Use structured blueprint as source of truth - 以结构化大纲为主数据
+  const maxExistingChapter = blueprintData.length > 0
+    ? Math.max(...blueprintData.map(chapter => chapter.number))
     : 0
 
   let currentStart = maxExistingChapter + 1
 
-  if (chunkSize >= numberOfChapters && !blueprint) {
+  if (chunkSize >= numberOfChapters && blueprintData.length === 0) {
     // Single shot generation - 一次性生成
     onProgress(getProgressText('generatingChapterBlueprint') + ` (1-${numberOfChapters})...`, 0, 1)
     const prompt = chapterBlueprintPrompt({
@@ -212,10 +211,11 @@ ${project.plotArchitecture}
       novelArchitecture,
       numberOfChapters
     })
-    blueprint = cleanResponse(await chatCompletion(apiConfig, prompt))
+    const response = cleanResponse(await chatCompletion(apiConfig, prompt))
+    blueprintData = parseChapterBlueprint(response)
     
     // 验证生成数量
-    const generatedCount = parseChapterBlueprint(blueprint).length
+    const generatedCount = blueprintData.length
     if (generatedCount < numberOfChapters) {
       console.warn(`大纲生成不完整：期望${numberOfChapters}章，实际${generatedCount}章`)
     }
@@ -230,8 +230,8 @@ ${project.plotArchitecture}
         numberOfChapters
       )
 
-      // Limit existing blueprint to last 100 chapters - 限制已有大纲到最近 100 章
-      const limitedBlueprint = limitChapterBlueprint(blueprint, 100)
+      // Limit existing blueprint context to recent chapters - 限制已有大纲上下文到最近章节
+      const limitedBlueprint = limitChapterBlueprintData(blueprintData, 100)
 
       const prompt = chunkedChapterBlueprintPrompt({
         userGuidance,
@@ -246,22 +246,24 @@ ${project.plotArchitecture}
       
       if (chunkResult) {
         // 验证本块生成的章节数量
-        const actualCount = parseChapterBlueprint(chunkResult).length
+        const chunkChapters = parseChapterBlueprint(chunkResult)
+        const actualCount = chunkChapters.length
         if (actualCount < expectedCount) {
           console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
           // 尝试重试一次
           onProgress(getProgressText('generationIncomplete', { actual: actualCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
           const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
-          const retryCount = parseChapterBlueprint(retryResult).length
+          const retryChapters = parseChapterBlueprint(retryResult)
+          const retryCount = retryChapters.length
           if (retryCount > actualCount) {
-            blueprint = blueprint ? `${blueprint}\n\n${retryResult}` : retryResult
+            blueprintData = mergeBlueprintChapters(blueprintData, retryChapters)
             onProgress(getProgressText('retrySuccess', { count: retryCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
           } else {
-            blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
+            blueprintData = mergeBlueprintChapters(blueprintData, chunkChapters)
             onProgress(`⚠️ 重试未改善：${actualCount}/${expectedCount}章`, currentStart - 1, numberOfChapters)
           }
         } else {
-          blueprint = blueprint ? `${blueprint}\n\n${chunkResult}` : chunkResult
+          blueprintData = mergeBlueprintChapters(blueprintData, chunkChapters)
         }
       }
 
@@ -270,7 +272,8 @@ ${project.plotArchitecture}
   }
 
   // 最终验证
-  const finalCount = parseChapterBlueprint(blueprint).length
+  blueprintData = parseChapterBlueprint(blueprintData)
+  const finalCount = blueprintData.length
   if (finalCount < numberOfChapters) {
     console.error(`大纲生成完成但数量不足：期望${numberOfChapters}章，实际${finalCount}章`)
     onProgress(`⚠️ 大纲生成不完整：${finalCount}/${numberOfChapters}章`, numberOfChapters, numberOfChapters)
@@ -278,7 +281,10 @@ ${project.plotArchitecture}
     onProgress('章节大纲生成完成!', numberOfChapters, numberOfChapters)
   }
   
-  return blueprint
+  return {
+    chapterBlueprintData: blueprintData,
+    chapterBlueprint: formatChapterBlueprintMarkdown(blueprintData)
+  }
 }
 
 /**
@@ -292,6 +298,66 @@ function limitChapterBlueprint(blueprint, limit) {
   if (chapters.length <= limit) return blueprint
   
   return chapters.slice(-limit).join('\n\n').trim()
+}
+
+function limitChapterBlueprintData(chapters, limit) {
+  const limited = parseChapterBlueprint(chapters).slice(-limit)
+  return JSON.stringify({ chapters: limited }, null, 2)
+}
+
+function mergeBlueprintChapters(existing, incoming) {
+  const byNumber = new Map()
+
+  for (const chapter of parseChapterBlueprint(existing)) {
+    byNumber.set(chapter.number, chapter)
+  }
+
+  for (const chapter of parseChapterBlueprint(incoming)) {
+    byNumber.set(chapter.number, chapter)
+  }
+
+  return [...byNumber.values()].sort((a, b) => a.number - b.number)
+}
+
+function formatChapterBlueprintChapter(chapter) {
+  const plotPoints = chapter.plotPoints || {}
+  const foreshadowingPlan = chapter.foreshadowingPlan || normalizeForeshadowing(chapter.foreshadowing || '')
+
+  return [
+    `第 ${chapter.number} 章 - ${chapter.title || '未命名'}`,
+    chapter.position ? `【本章定位】${chapter.position}` : '',
+    chapter.purpose ? `【核心作用】${chapter.purpose}` : '',
+    chapter.emotionalTone ? `【情感基调】${chapter.emotionalTone}` : '',
+    chapter.characters ? `【出场角色】${chapter.characters}` : '',
+    chapter.sceneDesign ? `【场景设计】${chapter.sceneDesign}` : '',
+    `【情节要点】`,
+    plotPoints.opening ? `  1. 开场：${plotPoints.opening}` : '',
+    plotPoints.development ? `  2. 发展：${plotPoints.development}` : '',
+    plotPoints.turningPoint ? `  3. 转折：${plotPoints.turningPoint}` : '',
+    plotPoints.conclusion ? `  4. 收尾：${plotPoints.conclusion}` : '',
+    `【伏笔操作】`,
+    foreshadowingPlan.plant ? `  - 埋设：${foreshadowingPlan.plant}` : '',
+    foreshadowingPlan.strengthen ? `  - 强化：${foreshadowingPlan.strengthen}` : '',
+    foreshadowingPlan.recover ? `  - 回收：${foreshadowingPlan.recover}` : '',
+    chapter.suspense ? `【悬念密度】${chapter.suspense}` : '',
+    chapter.tension ? `【情节张力】${chapter.tension}` : '',
+    chapter.twistLevel ? `【认知颠覆】${chapter.twistLevel}` : '',
+    chapter.summary ? `【本章简述】${chapter.summary}` : ''
+  ].filter(Boolean).join('\n')
+}
+
+function attachBlueprintRawText(chapter) {
+  return {
+    ...chapter,
+    rawText: chapter.rawText || formatChapterBlueprintChapter(chapter)
+  }
+}
+
+export function formatChapterBlueprintMarkdown(chapters) {
+  return parseChapterBlueprint(chapters)
+    .map(formatChapterBlueprintChapter)
+    .join('\n\n')
+    .trim()
 }
 
 function getChapterBlocks(blueprint) {
@@ -432,12 +498,13 @@ function normalizeChapterBlueprintItem(item) {
 
 function parseChapterBlueprintJson(blueprint) {
   try {
-    const parsed = JSON.parse(blueprint)
+    const parsed = typeof blueprint === 'string' ? parseJsonResponse(blueprint) : blueprint
     const chapters = Array.isArray(parsed) ? parsed : parsed.chapters
     if (!Array.isArray(chapters)) return []
     return chapters
       .map(normalizeChapterBlueprintItem)
       .filter(chapter => Number.isFinite(chapter.number))
+      .map(attachBlueprintRawText)
       .sort((a, b) => a.number - b.number)
   } catch (error) {
     return []
@@ -452,6 +519,7 @@ export function parseChapterBlueprint(blueprint) {
     return blueprint
       .map(normalizeChapterBlueprintItem)
       .filter(chapter => Number.isFinite(chapter.number))
+      .map(attachBlueprintRawText)
       .sort((a, b) => a.number - b.number)
   }
 
@@ -490,7 +558,7 @@ export function parseChapterBlueprint(blueprint) {
     })
   }
 
-  return chapters
+  return chapters.map(attachBlueprintRawText)
 }
 
 export function getProjectBlueprintChapters(project) {

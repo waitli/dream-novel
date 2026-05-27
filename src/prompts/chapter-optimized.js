@@ -44,26 +44,38 @@ Design the **rhythm distribution** for ${params.numberOfChapters} chapters (adju
 - Arrange emotional rhythm reasonably between units (balance tension and relaxation)
 - Reserve foreshadowing for key turning point chapters
 
-## Chapter Design (strictly follow format, 100-150 words per chapter)
+## Output JSON schema
 
-Chapter n - [Chapter Title, 8-15 words]
-[Chapter Position] [Character perspective/Key event, 15 words]
-[Core Role] [Main plot progression/Character growth/Relationship change, 20 words]
-[Emotional Tone] [Tense/Warm/Suspenseful, 10 words]
-[Characters] [Main characters and state changes, 30 words]
-[Scene Design] [1-2 main scenes, 30 words]
-[Plot Points]
-  1. Opening: [15 words]
-  2. Development: [30 words]
-  3. Turning Point: [20 words]
-  4. Conclusion: [15 words]
-[Foreshadowing]
-  - Plant: [New foreshadowing and expected recovery chapter]
-  - Strengthen: [Existing foreshadowing deepening]
-  - Recover: [Foreshadowing recovered in this chapter]
-[Suspense Density] [★☆☆☆☆～★★★★★]
-[Plot Tension] [★☆☆☆☆～★★★★★]
-[Chapter Summary] [100-150 words summary, including specific events and character changes]
+Return a single valid JSON object:
+
+{
+  "chapters": [
+    {
+      "number": 1,
+      "title": "Chapter title, 8-15 words",
+      "position": "Character perspective/key event, about 15 words",
+      "purpose": "Main plot progression/character growth/relationship change, about 20 words",
+      "emotionalTone": "Tense/Warm/Suspenseful, about 10 words",
+      "characters": "Main characters and state changes, about 30 words",
+      "sceneDesign": "1-2 main scenes, about 30 words",
+      "plotPoints": {
+        "opening": "Opening, about 15 words",
+        "development": "Development, about 30 words",
+        "turningPoint": "Turning point, about 20 words",
+        "conclusion": "Conclusion, about 15 words"
+      },
+      "foreshadowingPlan": {
+        "plant": "New foreshadowing and expected recovery chapter",
+        "strengthen": "Existing foreshadowing deepening",
+        "recover": "Foreshadowing recovered in this chapter"
+      },
+      "suspense": "★☆☆☆☆～★★★★★",
+      "tension": "★☆☆☆☆～★★★★★",
+      "twistLevel": "★☆☆☆☆～★★★★★",
+      "summary": "100-150 words summary, including specific events and character changes"
+    }
+  ]
+}
 
 ## Requirements
 1. **Each chapter summary 100-150 words**, including core plot development
@@ -72,11 +84,12 @@ Chapter n - [Chapter Title, 8-15 words]
 4. **Strictly follow character settings and world-building from novel architecture**
 5. Do not include ending chapters before generating all ${params.numberOfChapters} chapters
 6. **Must generate complete ${params.numberOfChapters} chapters, no omissions**
-7. **Each chapter must have title and summary, ensure complete format**
+7. **Each chapter must have title and summary, ensure complete JSON fields**
+8. JSON must include exactly ${params.numberOfChapters} chapter objects numbered 1 to ${params.numberOfChapters}
 
 **Now generate the outline for ${params.numberOfChapters} chapters.**
 
-Return only the final text, do not explain anything.
+Return only valid JSON. Do not wrap it in markdown fences. Do not explain anything.
 `
   }
   
@@ -93,26 +106,38 @@ ${params.novelArchitecture}
 - 单元之间合理安排情感节奏（张弛有度）
 - 关键转折章需预留铺垫
 
-## 每章设计（严格按照以下格式，每章简述 100-150 字）
+## 输出 JSON 结构
 
-第 n 章 - [章节标题，8-15 字]
-【本章定位】[角色视角/关键事件，15 字]
-【核心作用】[推进主线/角色成长/关系变化，20 字]
-【情感基调】[紧张/温馨/悬疑等，10 字]
-【出场角色】[主要角色及状态变化，30 字]
-【场景设计】[主要场景 1-2 个，30 字]
-【情节要点】
-  1. 开场：[15 字]
-  2. 发展：[30 字]
-  3. 转折：[20 字]
-  4. 收尾：[15 字]
-【伏笔操作】
-  - 埋设：[新伏笔及预计回收章节]
-  - 强化：[已有伏笔加深]
-  - 回收：[本章回收的伏笔]
-【悬念密度】[★☆☆☆☆～★★★★★]
-【情节张力】[★☆☆☆☆～★★★★★]
-【本章简述】[100-150 字概括，包含具体事件和角色变化]
+返回一个合法 JSON 对象：
+
+{
+  "chapters": [
+    {
+      "number": 1,
+      "title": "章节标题，8-15 字",
+      "position": "角色视角/关键事件，约 15 字",
+      "purpose": "推进主线/角色成长/关系变化，约 20 字",
+      "emotionalTone": "紧张/温馨/悬疑等，约 10 字",
+      "characters": "主要角色及状态变化，约 30 字",
+      "sceneDesign": "主要场景 1-2 个，约 30 字",
+      "plotPoints": {
+        "opening": "开场，约 15 字",
+        "development": "发展，约 30 字",
+        "turningPoint": "转折，约 20 字",
+        "conclusion": "收尾，约 15 字"
+      },
+      "foreshadowingPlan": {
+        "plant": "新伏笔及预计回收章节",
+        "strengthen": "已有伏笔加深",
+        "recover": "本章回收的伏笔"
+      },
+      "suspense": "★☆☆☆☆～★★★★★",
+      "tension": "★☆☆☆☆～★★★★★",
+      "twistLevel": "★☆☆☆☆～★★★★★",
+      "summary": "100-150 字概括，包含具体事件和角色变化"
+    }
+  ]
+}
 
 ## 输出要求
 1. **每章简述 100-150 字**，包含核心情节发展
@@ -121,11 +146,12 @@ ${params.novelArchitecture}
 4. **严格遵循小说架构中的角色设定和世界观**
 5. 在生成${params.numberOfChapters}章前不要出现结局章节
 6. **必须生成完整的${params.numberOfChapters}章，不能遗漏任何章节**
-7. **每章都要有标题和本章简述，确保格式完整**
+7. **每章都要有标题和本章简述，确保 JSON 字段完整**
+8. JSON 必须包含完整 ${params.numberOfChapters} 个章节对象，number 从 1 到 ${params.numberOfChapters}
 
 **现在开始生成${params.numberOfChapters}章的大纲。**
 
-仅给出最终文本，不要解释任何内容。
+仅返回合法 JSON，不要使用 markdown 代码块，不要解释任何内容。
 `
 }
 
@@ -147,26 +173,38 @@ ${params.chapterList || '(None)'}
 
 Now please design the rhythm distribution for chapters ${params.startChapter} to ${params.endChapter}:
 
-## Chapter Design (strictly follow format, 100-150 words per chapter)
+## Output JSON schema
 
-Chapter n - [Chapter Title]
-[Chapter Position]
-[Core Role]
-[Emotional Tone]
-[Characters]
-[Scene Design]
-[Plot Points]
-  1. Opening:
-  2. Development:
-  3. Turning Point:
-  4. Conclusion:
-[Foreshadowing]
-  - Plant:
-  - Strengthen:
-  - Recover:
-[Suspense Density]
-[Plot Tension]
-[Chapter Summary]
+Return a single valid JSON object:
+
+{
+  "chapters": [
+    {
+      "number": ${params.startChapter},
+      "title": "Chapter title",
+      "position": "Chapter position",
+      "purpose": "Core role",
+      "emotionalTone": "Emotional tone",
+      "characters": "Characters",
+      "sceneDesign": "Scene design",
+      "plotPoints": {
+        "opening": "Opening",
+        "development": "Development",
+        "turningPoint": "Turning point",
+        "conclusion": "Conclusion"
+      },
+      "foreshadowingPlan": {
+        "plant": "Plant",
+        "strengthen": "Strengthen",
+        "recover": "Recover"
+      },
+      "suspense": "★☆☆☆☆～★★★★★",
+      "tension": "★☆☆☆☆～★★★★★",
+      "twistLevel": "★☆☆☆☆～★★★★★",
+      "summary": "100-150 words summary"
+    }
+  ]
+}
 
 ## Requirements
 1. Each chapter summary 100-150 words
@@ -174,10 +212,11 @@ Chapter n - [Chapter Title]
 3. Character changes should be specific
 4. Strictly follow novel architecture
 5. Must generate complete chapters from ${params.startChapter} to ${params.endChapter}
+6. JSON must include exactly ${params.endChapter - params.startChapter + 1} chapter objects, numbered ${params.startChapter} to ${params.endChapter}
 
 **Now generate chapters ${params.startChapter} to ${params.endChapter}.**
 
-Return only the final text, do not explain anything.
+Return only valid JSON. Do not wrap it in markdown fences. Do not explain anything.
 `
   }
   
@@ -194,26 +233,38 @@ ${params.chapterList || '(无)'}
 
 现在请设计第${params.startChapter}章到第${params.endChapter}章的节奏分布：
 
-## 每章设计（严格按照以下格式，每章简述 100-150 字）
+## 输出 JSON 结构
 
-第 n 章 - [章节标题]
-【本章定位】[...]
-【核心作用】[...]
-【情感基调】[...]
-【出场角色】[...]
-【场景设计】[...]
-【情节要点】
-  1. 开场：[...]
-  2. 发展：[...]
-  3. 转折：[...]
-  4. 收尾：[...]
-【伏笔操作】
-  - 埋设：[...]
-  - 强化：[...]
-  - 回收：[...]
-【悬念密度】[★☆☆☆☆～★★★★★]
-【情节张力】[★☆☆☆☆～★★★★★]
-【本章简述】[100-150 字概括]
+返回一个合法 JSON 对象：
+
+{
+  "chapters": [
+    {
+      "number": ${params.startChapter},
+      "title": "章节标题",
+      "position": "本章定位",
+      "purpose": "核心作用",
+      "emotionalTone": "情感基调",
+      "characters": "出场角色及状态变化",
+      "sceneDesign": "场景设计",
+      "plotPoints": {
+        "opening": "开场",
+        "development": "发展",
+        "turningPoint": "转折",
+        "conclusion": "收尾"
+      },
+      "foreshadowingPlan": {
+        "plant": "埋设",
+        "strengthen": "强化",
+        "recover": "回收"
+      },
+      "suspense": "★☆☆☆☆～★★★★★",
+      "tension": "★☆☆☆☆～★★★★★",
+      "twistLevel": "★☆☆☆☆～★★★★★",
+      "summary": "100-150 字概括"
+    }
+  ]
+}
 
 **注意保持与已有章节的连贯性，伏笔前后一致。**
 
@@ -221,8 +272,9 @@ ${params.chapterList || '(无)'}
 1. **必须生成第${params.startChapter}章到第${params.endChapter}章，共${params.endChapter - params.startChapter + 1}章，不能遗漏**
 2. 每章都要有标题和本章简述
 3. 如果内容过长，也要确保所有章节都生成完整
+4. JSON 必须只包含第${params.startChapter}章到第${params.endChapter}章，number 不能错位
 
-仅给出最终文本，不要解释任何内容。
+仅返回合法 JSON，不要使用 markdown 代码块，不要解释任何内容。
 `
 }
 

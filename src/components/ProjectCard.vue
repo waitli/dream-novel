@@ -70,7 +70,7 @@ const progress = computed(() => {
   if (props.project.characterDynamics) completed++
   if (props.project.worldBuilding) completed++
   if (props.project.plotArchitecture) completed++
-  if (props.project.chapterBlueprint) completed++
+  if (props.project.chapterBlueprintData?.length || props.project.chapterBlueprint) completed++
   return Math.round((completed / 5) * 100)
 })
 </script>

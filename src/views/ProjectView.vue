@@ -5,7 +5,7 @@ import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { useSeo } from '../composables/useSeo'
-import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
+import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, formatChapterBlueprintMarkdown, getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
 import { useMessage, useDialog, NButton, NTabs, NTabPane, NCard, NProgress, NTag, NIcon } from 'naive-ui'
 import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline, CompassOutline } from '@vicons/ionicons5'
 import ArchitecturePanel from '../components/ArchitecturePanel.vue'
@@ -135,7 +135,7 @@ async function handleGenerateBlueprint() {
   try {
     isGenerating.value = true
     
-    const blueprint = await generateChapterBlueprint(
+    const blueprintResult = await generateChapterBlueprint(
       project.value,
       settings.getStageConfig('blueprint'),
       (step, current, total) => {
@@ -144,9 +144,12 @@ async function handleGenerateBlueprint() {
       }
     )
 
+    const chapterBlueprintData = blueprintResult.chapterBlueprintData || parseChapterBlueprint(blueprintResult.chapterBlueprint || blueprintResult)
+    const chapterBlueprint = blueprintResult.chapterBlueprint || formatChapterBlueprintMarkdown(chapterBlueprintData)
+
     novelStore.updateProject(project.value.id, {
-      chapterBlueprint: blueprint,
-      chapterBlueprintData: parseChapterBlueprint(blueprint),
+      chapterBlueprint,
+      chapterBlueprintData,
       blueprintGenerated: true
     })
 
