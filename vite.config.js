@@ -7,6 +7,7 @@ export default defineConfig({
   base: '/', // 自定义域名使用根路径
   plugins: [vue()],
   build: {
+    chunkSizeWarningLimit: 600,
     rolldownOptions: {
       output: {
         codeSplitting: {
@@ -19,20 +20,17 @@ export default defineConfig({
             {
               name: 'naive-ui',
               test: /node_modules[\\/](naive-ui|@css-render|css-render|date-fns|vooks|vueuc|treemate|seemly)[\\/]/,
-              priority: 30,
-              maxSize: 450000
+              priority: 30
             },
             {
               name: 'echarts',
               test: /node_modules[\\/](echarts|zrender|tslib)[\\/]/,
-              priority: 30,
-              maxSize: 450000
+              priority: 30
             },
             {
               name: 'icons',
               test: /node_modules[\\/]@vicons[\\/]/,
-              priority: 20,
-              maxSize: 450000
+              priority: 20
             }
           ]
         }

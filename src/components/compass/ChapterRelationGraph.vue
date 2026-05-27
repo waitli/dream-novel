@@ -1,8 +1,14 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, shallowRef } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import 'echarts/theme/dark'
 import { useSettingsStore } from '../../stores/settings'
 import { getFactionColorMap, RELATION_LABELS, toEChartsGraphData } from '../../utils/graph-helpers'
+
+echarts.use([GraphChart, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const props = defineProps({
   graphData: Object, // { nodes, edges }
