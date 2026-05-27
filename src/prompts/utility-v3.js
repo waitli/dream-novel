@@ -284,6 +284,72 @@ ${params.currentWorldDB || '{"entries": []}'}
 5. 仅返回 JSON。
 `;
 
+/**
+ * 定稿前一致性检查。
+ *
+ * @param {Object} params
+ * @param {string} params.chapterText - 待定稿章节全文
+ * @param {number} params.chapterNumber - 章节号
+ * @param {string} params.chapterOutline - 本章大纲
+ * @param {string} params.previousContext - 前文上下文
+ * @param {string} params.characterState - 当前角色状态
+ * @param {string} params.foreshadowingDB - 伏笔数据库
+ * @param {string} params.worldBuildingDB - 世界观数据库
+ */
+export const checkChapterConsistency = (params) => `
+你是一个严格的小说连续性审稿人。请在章节定稿前检查正文是否适合写入长期记忆。
+
+## 待检查章节
+第 ${params.chapterNumber} 章
+
+${params.chapterText}
+
+## 本章大纲
+${params.chapterOutline || '(无)'}
+
+## 前文上下文
+${params.previousContext || '(无)'}
+
+## 当前角色状态
+${params.characterState || '(无)'}
+
+## 当前伏笔数据库
+${params.foreshadowingDB || '{"foreshadowing": []}'}
+
+## 当前世界观数据库
+${params.worldBuildingDB || '{"entries": []}'}
+
+---
+
+请只输出 JSON，不要解释。
+
+\`\`\`json
+{
+  "passed": true,
+  "score": 90,
+  "summary": "一句话说明本章是否适合定稿",
+  "issues": [
+    {
+      "severity": "blocker/high/medium/low",
+      "type": "outline_deviation/character_state/foreshadowing/worldbuilding/continuity/quality",
+      "description": "具体问题，说明正文哪里与大纲或记忆冲突",
+      "suggestion": "可执行修改建议"
+    }
+  ],
+  "missingForeshadowing": ["本章大纲要求但正文遗漏的伏笔操作"],
+  "newFactsToConfirm": ["正文新增但可能需要用户确认的重要设定或角色状态"],
+  "recommendedAction": "finalize/revise/review"
+}
+\`\`\`
+
+判定规则：
+1. 大纲偏离、角色状态冲突、关键伏笔遗漏、世界观规则冲突属于 high 或 blocker。
+2. 文风、节奏、小细节不充分属于 medium 或 low。
+3. 若存在 blocker，passed 必须为 false，recommendedAction 为 revise。
+4. 若只有 low 问题，可以 passed 为 true。
+5. 不要捏造正文没有出现的问题。
+`;
+
 
 // ========================
 // 第二层：弧/卷级汇总摘要
@@ -783,6 +849,7 @@ export const utilityPromptsV3 = {
   // 核心更新函数
   generateChapterSummary,
   extractChapterFacts,
+  checkChapterConsistency,
   generateArcSummary,
   updateCharacterDB,
   updateForeshadowingDB,

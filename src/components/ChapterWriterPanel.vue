@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
-import { generateChapterDraft, finalizeChapter, enrichChapter, getProjectBlueprintChapters } from '../api/generator'
+import { generateChapterDraft, finalizeChapter, checkChapterConsistency, enrichChapter, getProjectBlueprintChapters } from '../api/generator'
 import { generateChapterGraph } from '../api/compass-generator'
 import { useMessage, useDialog, NButton, NInput, NProgress, NTag, NIcon, NTooltip } from 'naive-ui'
 import { WarningOutline, SparklesOutline, PencilOutline, SaveOutline, CheckmarkOutline, CheckmarkCircleOutline, ReloadOutline, HelpCircleOutline, DocumentTextOutline } from '@vicons/ionicons5'
@@ -41,9 +41,8 @@ const writtenChaptersCount = computed(() => {
 
 // Next chapter to write - 下一个要写的章节
 const nextChapterToWrite = computed(() => {
-  const chapters = props.project?.chapters || {}
   for (let i = 1; i <= props.project?.numberOfChapters; i++) {
-    if (!chapters[i]) return i
+    if (getChapterStatus(i) !== 'finalized') return i
   }
   return props.project?.numberOfChapters || 1
 })
@@ -53,10 +52,15 @@ const currentChapterInfo = computed(() => {
   return blueprintChapters.value.find(c => c.number === currentChapter.value) || null
 })
 
-// Check if chapter exists - 检查章节是否已存在
-const chapterExists = computed(() => {
-  return !!props.project?.chapters?.[currentChapter.value]
+const finalizedChaptersCount = computed(() => {
+  let count = 0
+  for (let i = 1; i <= (props.project?.numberOfChapters || 0); i++) {
+    if (getChapterStatus(i) === 'finalized') count++
+  }
+  return count
 })
+
+const currentChapterStatus = computed(() => getChapterStatus(currentChapter.value))
 
 // Current chapter's relation graph data
 const currentChapterGraph = computed(() => {
@@ -67,6 +71,100 @@ const currentChapterGraph = computed(() => {
 function loadChapter(num) {
   currentChapter.value = num
   chapterContent.value = props.project?.chapters?.[num] || ''
+}
+
+function getChapterMeta(num) {
+  return props.project?.chapterMeta?.[num] || {}
+}
+
+function getChapterStatus(num) {
+  const metaStatus = getChapterMeta(num).status
+  if (metaStatus) return metaStatus
+  if ((props.project?.chapterSummaries || []).some(summary => Number(summary?.chapter) === Number(num))) return 'finalized'
+  return props.project?.chapters?.[num] ? 'draft' : 'empty'
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    finalized: '已定稿',
+    needs_refinalize: '需重新定稿',
+    draft: '草稿',
+    empty: '未保存'
+  }
+  return labels[status] || '未保存'
+}
+
+function getStatusType(status) {
+  const types = {
+    finalized: 'success',
+    needs_refinalize: 'warning',
+    draft: 'info',
+    empty: 'default'
+  }
+  return types[status] || 'default'
+}
+
+function buildChapterMeta(status, extra = {}) {
+  const now = new Date().toISOString()
+  return {
+    ...getChapterMeta(currentChapter.value),
+    status,
+    updatedAt: now,
+    wordCount: chapterContent.value.length,
+    ...extra
+  }
+}
+
+function hasSignificantConsistencyIssues(report) {
+  if (!report) return false
+  if (report.passed === false) return true
+  if (report.recommendedAction && report.recommendedAction !== 'finalize') return true
+  const significant = new Set(['blocker', 'high', 'medium'])
+  return (report.issues || []).some(issue => significant.has(String(issue.severity || '').toLowerCase())) ||
+    (report.missingForeshadowing || []).length > 0 ||
+    (report.newFactsToConfirm || []).length > 0
+}
+
+function formatConsistencyReport(report) {
+  const lines = []
+  if (report.summary) lines.push(report.summary)
+  if (report.score !== null && report.score !== undefined) lines.push(`评分：${report.score}`)
+
+  const issues = report.issues || []
+  if (issues.length) {
+    lines.push('')
+    lines.push('问题：')
+    issues.slice(0, 6).forEach(issue => {
+      lines.push(`- [${issue.severity || 'review'}] ${issue.description || ''}${issue.suggestion ? `；建议：${issue.suggestion}` : ''}`)
+    })
+  }
+
+  if (report.missingForeshadowing?.length) {
+    lines.push('')
+    lines.push(`遗漏伏笔：${report.missingForeshadowing.join('；')}`)
+  }
+
+  if (report.newFactsToConfirm?.length) {
+    lines.push('')
+    lines.push(`待确认新增事实：${report.newFactsToConfirm.join('；')}`)
+  }
+
+  return lines.join('\n') || '一致性检查发现需要确认的问题。'
+}
+
+async function confirmConsistencyReport(report) {
+  if (!hasSignificantConsistencyIssues(report)) return true
+
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '定稿前一致性检查',
+      content: formatConsistencyReport(report),
+      positiveText: '仍然定稿',
+      negativeText: '返回修改',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false)
+    })
+  })
 }
 
 // Generate chapter draft - 生成章节草稿
@@ -81,12 +179,25 @@ async function handleGenerate() {
     return
   }
 
-  // Check if previous chapters exist for non-first chapters
+  // Check if previous chapters exist and are finalized for non-first chapters
   if (currentChapter.value > 1 && !props.project?.chapters?.[currentChapter.value - 1]) {
     const confirmed = await new Promise((resolve) => {
       dialog.warning({
         title: t('common.tip'),
         content: `第 ${currentChapter.value - 1} 章还未生成，建议先按顺序生成。是否继续？`,
+        positiveText: t('chapterWriter.continueGenerate'),
+        negativeText: t('common.cancel'),
+        onPositiveClick: () => resolve(true),
+        onNegativeClick: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+  } else if (currentChapter.value > 1 && getChapterStatus(currentChapter.value - 1) !== 'finalized') {
+    const previousStatus = getStatusLabel(getChapterStatus(currentChapter.value - 1))
+    const confirmed = await new Promise((resolve) => {
+      dialog.warning({
+        title: t('common.tip'),
+        content: `第 ${currentChapter.value - 1} 章当前状态为「${previousStatus}」，记忆可能尚未更新。继续生成可能造成上下文断层。是否继续？`,
         positiveText: t('chapterWriter.continueGenerate'),
         negativeText: t('common.cancel'),
         onPositiveClick: () => resolve(true),
@@ -134,6 +245,32 @@ async function handleSaveAndFinalize() {
 
     // Save chapter content - 保存章节内容
     const updatedChapters = { ...props.project.chapters, [currentChapter.value]: chapterContent.value }
+
+    generationStep.value = '正在进行定稿前一致性检查...'
+    let consistencyReport = null
+    try {
+      consistencyReport = await checkChapterConsistency(
+        props.project,
+        currentChapter.value,
+        chapterContent.value,
+        settings.getStageConfig('finalize')
+      )
+      const confirmed = await confirmConsistencyReport(consistencyReport)
+      if (!confirmed) return
+    } catch (checkError) {
+      console.error('Consistency check error:', checkError)
+      const confirmed = await new Promise((resolve) => {
+        dialog.warning({
+          title: '一致性检查失败',
+          content: `无法完成定稿前一致性检查：${checkError.message}。是否跳过检查继续定稿？`,
+          positiveText: '继续定稿',
+          negativeText: '取消',
+          onPositiveClick: () => resolve(true),
+          onNegativeClick: () => resolve(false)
+        })
+      })
+      if (!confirmed) return
+    }
     
     // Finalize chapter (update summary and character state)
     const updates = await finalizeChapter(
@@ -146,6 +283,14 @@ async function handleSaveAndFinalize() {
 
     novelStore.updateProject(props.project.id, {
       chapters: updatedChapters,
+      chapterMeta: {
+        ...(props.project.chapterMeta || {}),
+        [currentChapter.value]: buildChapterMeta('finalized', {
+          finalizedAt: new Date().toISOString(),
+          memoryUpdatedAt: new Date().toISOString(),
+          consistencyCheck: consistencyReport
+        })
+      },
       ...updates
     })
 
@@ -178,8 +323,22 @@ function handleQuickSave() {
   }
 
   const updatedChapters = { ...props.project.chapters, [currentChapter.value]: chapterContent.value }
-  novelStore.updateProject(props.project.id, { chapters: updatedChapters })
-  message.success('已保存')
+  const previousStatus = getChapterStatus(currentChapter.value)
+  const previousContent = props.project?.chapters?.[currentChapter.value] || ''
+  const status = previousStatus === 'finalized' && previousContent !== chapterContent.value
+    ? 'needs_refinalize'
+    : previousStatus === 'finalized'
+      ? 'finalized'
+      : 'draft'
+
+  novelStore.updateProject(props.project.id, {
+    chapters: updatedChapters,
+    chapterMeta: {
+      ...(props.project.chapterMeta || {}),
+      [currentChapter.value]: buildChapterMeta(status)
+    }
+  })
+  message.success(status === 'needs_refinalize' ? '已保存，需重新定稿以更新记忆' : '已保存')
 }
 
 // Enrich chapter - 扩写章节
@@ -267,9 +426,11 @@ loadChapter(nextChapterToWrite.value)
       <div class="bg-white dark:bg-[#1f1f23] rounded-xl p-5 border border-gray-200/80 dark:border-gray-700/50">
         <div class="flex items-center justify-between mb-3">
           <span class="text-sm font-medium text-gray-600 dark:text-gray-400">写作进度</span>
-          <span class="text-sm font-bold text-gray-800 dark:text-white">
-            {{ writtenChaptersCount }} / {{ project.numberOfChapters }} 章
-          </span>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="font-medium text-gray-500 dark:text-gray-400">已保存 {{ writtenChaptersCount }}</span>
+            <span class="text-gray-300 dark:text-gray-600">/</span>
+            <span class="font-bold text-gray-800 dark:text-white">已定稿 {{ finalizedChaptersCount }} / {{ project.numberOfChapters }}</span>
+          </div>
         </div>
         <n-progress 
           type="line"
@@ -301,9 +462,21 @@ loadChapter(nextChapterToWrite.value)
                   <span class="text-sm font-medium text-gray-800 dark:text-white truncate flex-1">
                     第{{ ch.number }}章
                   </span>
-                  <CheckmarkCircleOutline v-if="project.chapters?.[ch.number]" class="w-5 h-5 text-green-500 ml-2" />
+                  <CheckmarkCircleOutline v-if="getChapterStatus(ch.number) === 'finalized'" class="w-5 h-5 text-green-500 ml-2" />
+                  <WarningOutline v-else-if="getChapterStatus(ch.number) === 'needs_refinalize'" class="w-5 h-5 text-amber-500 ml-2" />
                 </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">{{ ch.title }}</p>
+                <div class="flex items-center gap-2 mt-1">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate flex-1">{{ ch.title }}</p>
+                  <n-tag
+                    v-if="getChapterStatus(ch.number) !== 'empty'"
+                    size="tiny"
+                    :type="getStatusType(getChapterStatus(ch.number))"
+                    :bordered="false"
+                    round
+                  >
+                    {{ getStatusLabel(getChapterStatus(ch.number)) }}
+                  </n-tag>
+                </div>
               </div>
             </div>
           </div>
@@ -318,8 +491,9 @@ loadChapter(nextChapterToWrite.value)
                 第{{ currentChapter }}章 - {{ currentChapterInfo?.title || '未命名' }}
               </h3>
               <div class="flex items-center gap-2">
-                <n-tag v-if="chapterExists" type="success" size="small" :bordered="false" round>已保存</n-tag>
-                <n-tag v-else type="info" size="small" :bordered="false" round>未保存</n-tag>
+                <n-tag :type="getStatusType(currentChapterStatus)" size="small" :bordered="false" round>
+                  {{ getStatusLabel(currentChapterStatus) }}
+                </n-tag>
               </div>
             </div>
             

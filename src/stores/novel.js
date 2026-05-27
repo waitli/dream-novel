@@ -32,6 +32,7 @@ export const useNovelStore = defineStore('novel', () => {
       chapterBlueprintData: [],
       // Chapters content (key: chapter number, value: chapter text) - 章节内容
       chapters: {},
+      chapterMeta: {},          // 章节状态与定稿元数据 { [chapter]: { status, updatedAt, finalizedAt } }
       // Global summary - 前文摘要
       globalSummary: '',
       // v3: 结构化存储

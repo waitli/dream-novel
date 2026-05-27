@@ -64,7 +64,7 @@ import { architecturePrompts } from '../prompts'
 import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
 import {
   estimateTokens,
-  generateChapterSummary, extractChapterFacts, generateArcSummary,
+  generateChapterSummary, extractChapterFacts, checkChapterConsistency as checkChapterConsistencyPrompt, generateArcSummary,
   updateCharacterDB, updateForeshadowingDB, updateWorldBuildingDB,
   assembleChapterContext, compressGlobalSummary, migrateOldSummary
 } from '../prompts/utility-v3'
@@ -1099,6 +1099,44 @@ function buildCharacterStateFromDB(characterDB, fallback = '') {
     return stateLines.join('\n\n') || fallback
   } catch (e) {
     return fallback
+  }
+}
+
+/**
+ * Check chapter consistency before finalizing - 定稿前一致性检查
+ */
+export async function checkChapterConsistency(project, chapterNumber, chapterText, apiConfig) {
+  const chapterOutline = getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
+  const previousSummary = buildCompatibilitySummary({
+    chapterSummaries: project.chapterSummaries || [],
+    currentArcSummary: project.currentArcSummary || '',
+    globalArcsSummary: project.globalArcsSummary || ''
+  }) || project.globalSummary || ''
+
+  const response = await chatCompletion(apiConfig, checkChapterConsistencyPrompt({
+    chapterText,
+    chapterNumber,
+    chapterOutline,
+    previousContext: previousSummary,
+    characterState: project.characterState || project.characterDB || '',
+    foreshadowingDB: project.foreshadowingDB || '{"foreshadowing": []}',
+    worldBuildingDB: project.worldBuildingDB || '{"entries": []}'
+  }))
+
+  const result = parseJsonResponse(response)
+  if (!result) {
+    throw new Error('一致性检查结果解析失败')
+  }
+
+  return {
+    passed: result.passed !== false,
+    score: Number.isFinite(Number(result.score)) ? Number(result.score) : null,
+    summary: result.summary || '',
+    issues: asArray(result.issues),
+    missingForeshadowing: asArray(result.missingForeshadowing),
+    newFactsToConfirm: asArray(result.newFactsToConfirm),
+    recommendedAction: result.recommendedAction || 'review',
+    checkedAt: new Date().toISOString()
   }
 }
 
