@@ -5,7 +5,7 @@ import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { useSeo } from '../composables/useSeo'
-import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
+import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
 import { useMessage, useDialog, NButton, NTabs, NTabPane, NCard, NProgress, NTag, NIcon } from 'naive-ui'
 import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline, CompassOutline } from '@vicons/ionicons5'
 import ArchitecturePanel from '../components/ArchitecturePanel.vue'
@@ -36,8 +36,8 @@ const project = computed(() => {
 
 // Parsed chapters
 const chapters = computed(() => {
-  if (!project.value?.chapterBlueprint) return []
-  return parseChapterBlueprint(project.value.chapterBlueprint)
+  if (!project.value?.chapterBlueprint && !project.value?.chapterBlueprintData?.length) return []
+  return getProjectBlueprintChapters(project.value)
 })
 
 // Check if API is configured
@@ -146,6 +146,7 @@ async function handleGenerateBlueprint() {
 
     novelStore.updateProject(project.value.id, {
       chapterBlueprint: blueprint,
+      chapterBlueprintData: parseChapterBlueprint(blueprint),
       blueprintGenerated: true
     })
 
@@ -206,6 +207,7 @@ async function confirmRegenerate(type) {
       } else {
         novelStore.updateProject(project.value.id, {
           chapterBlueprint: '',
+          chapterBlueprintData: [],
           blueprintGenerated: false
         })
         handleGenerateBlueprint()

@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
-import { generateChapterDraft, finalizeChapter, enrichChapter, parseChapterBlueprint } from '../api/generator'
+import { generateChapterDraft, finalizeChapter, enrichChapter, getProjectBlueprintChapters } from '../api/generator'
 import { generateChapterGraph } from '../api/compass-generator'
 import { useMessage, useDialog, NButton, NInput, NProgress, NTag, NIcon, NTooltip } from 'naive-ui'
 import { WarningOutline, SparklesOutline, PencilOutline, SaveOutline, CheckmarkOutline, CheckmarkCircleOutline, ReloadOutline, HelpCircleOutline, DocumentTextOutline } from '@vicons/ionicons5'
@@ -30,8 +30,8 @@ const graphStep = ref('')
 
 // Parsed blueprint chapters - 解析后的大纲章节
 const blueprintChapters = computed(() => {
-  if (!props.project?.chapterBlueprint) return []
-  return parseChapterBlueprint(props.project.chapterBlueprint)
+  if (!props.project?.chapterBlueprint && !props.project?.chapterBlueprintData?.length) return []
+  return getProjectBlueprintChapters(props.project)
 })
 
 // Written chapters count - 已写章节数
@@ -434,4 +434,3 @@ loadChapter(nextChapterToWrite.value)
     </template>
   </div>
 </template>
-

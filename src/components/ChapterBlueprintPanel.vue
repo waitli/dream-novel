@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useNovelStore } from '../stores/novel'
 import { useI18n } from '../i18n'
+import { parseChapterBlueprint } from '../api/generator'
 import { NButton, NInput, NTag, NIcon, NRadioGroup, NRadioButton } from 'naive-ui'
 import { WarningOutline, ListOutline, PlayOutline, RefreshOutline, GridOutline, DocumentTextOutline, SearchOutline, GitNetworkOutline } from '@vicons/ionicons5'
 
@@ -27,8 +28,8 @@ const filteredChapters = computed(() => {
   if (!searchQuery.value) return props.chapters
   const query = searchQuery.value.toLowerCase()
   return props.chapters.filter(ch => 
-    ch.title.toLowerCase().includes(query) ||
-    ch.summary.toLowerCase().includes(query)
+    (ch.title || '').toLowerCase().includes(query) ||
+    (ch.summary || '').toLowerCase().includes(query)
   )
 })
 
@@ -41,7 +42,10 @@ function getTwistStars(level) {
 
 // Update raw blueprint
 function updateBlueprint(value) {
-  novelStore.updateProject(props.project.id, { chapterBlueprint: value })
+  novelStore.updateProject(props.project.id, {
+    chapterBlueprint: value,
+    chapterBlueprintData: parseChapterBlueprint(value)
+  })
 }
 </script>
 

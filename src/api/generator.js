@@ -196,9 +196,9 @@ ${project.plotArchitecture}
   let blueprint = project.chapterBlueprint || ''
   
   // Parse existing chapters - 解析已有章节
-  const existingChapters = blueprint.match(/第\s*(\d+)\s*章/g) || []
+  const existingChapters = parseChapterBlueprint(blueprint)
   const maxExistingChapter = existingChapters.length > 0
-    ? Math.max(...existingChapters.map(c => parseInt(c.match(/\d+/)[0])))
+    ? Math.max(...existingChapters.map(chapter => chapter.number))
     : 0
 
   let currentStart = maxExistingChapter + 1
@@ -214,7 +214,7 @@ ${project.plotArchitecture}
     blueprint = cleanResponse(await chatCompletion(apiConfig, prompt))
     
     // 验证生成数量
-    const generatedCount = (blueprint.match(/第\s*\d+\s*章/g) || []).length
+    const generatedCount = parseChapterBlueprint(blueprint).length
     if (generatedCount < numberOfChapters) {
       console.warn(`大纲生成不完整：期望${numberOfChapters}章，实际${generatedCount}章`)
     }
@@ -245,13 +245,13 @@ ${project.plotArchitecture}
       
       if (chunkResult) {
         // 验证本块生成的章节数量
-        const actualCount = (chunkResult.match(/第\s*\d+\s*章/g) || []).length
+        const actualCount = parseChapterBlueprint(chunkResult).length
         if (actualCount < expectedCount) {
           console.warn(`第${currentStart}-${currentEnd}块生成不完整：期望${expectedCount}章，实际${actualCount}章`)
           // 尝试重试一次
           onProgress(getProgressText('generationIncomplete', { actual: actualCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
           const retryResult = cleanResponse(await chatCompletion(apiConfig, prompt))
-          const retryCount = (retryResult.match(/第\s*\d+\s*章/g) || []).length
+          const retryCount = parseChapterBlueprint(retryResult).length
           if (retryCount > actualCount) {
             blueprint = blueprint ? `${blueprint}\n\n${retryResult}` : retryResult
             onProgress(getProgressText('retrySuccess', { count: retryCount, expected: expectedCount }), currentStart - 1, numberOfChapters)
@@ -269,7 +269,7 @@ ${project.plotArchitecture}
   }
 
   // 最终验证
-  const finalCount = (blueprint.match(/第\s*\d+\s*章/g) || []).length
+  const finalCount = parseChapterBlueprint(blueprint).length
   if (finalCount < numberOfChapters) {
     console.error(`大纲生成完成但数量不足：期望${numberOfChapters}章，实际${finalCount}章`)
     onProgress(`⚠️ 大纲生成不完整：${finalCount}/${numberOfChapters}章`, numberOfChapters, numberOfChapters)
@@ -286,64 +286,226 @@ ${project.plotArchitecture}
 function limitChapterBlueprint(blueprint, limit) {
   if (!blueprint) return ''
   
-  const pattern = /(第\s*\d+\s*章.*?)(?=第\s*\d+\s*章|$)/gs
-  const chapters = blueprint.match(pattern) || []
+  const chapters = getChapterBlocks(blueprint).map(chapter => chapter.rawText)
   
   if (chapters.length <= limit) return blueprint
   
   return chapters.slice(-limit).join('\n\n').trim()
 }
 
+function getChapterBlocks(blueprint) {
+  const text = String(blueprint || '')
+  const headerPattern = /(^|\n)\s*(?:第\s*(\d+)\s*章|Chapter\s+(\d+))\s*(?:[-–—:：]\s*(.*?))?\s*(?=\r?\n|$)/gi
+  const matches = [...text.matchAll(headerPattern)]
+
+  return matches.map((match, index) => {
+    const leading = match[1] || ''
+    const headerStart = match.index + leading.length
+    const headerEnd = match.index + match[0].length
+    const nextStart = matches[index + 1]?.index ?? text.length
+    const number = Number.parseInt(match[2] || match[3], 10)
+    const title = cleanBlueprintValue(match[4] || '')
+
+    return {
+      number,
+      title,
+      header: text.slice(headerStart, headerEnd).trim(),
+      body: text.slice(headerEnd, nextStart).trim(),
+      rawText: text.slice(headerStart, nextStart).trim()
+    }
+  }).filter(chapter => Number.isFinite(chapter.number))
+}
+
+function cleanBlueprintValue(value) {
+  return String(value || '')
+    .replace(/^\[|\]$/g, '')
+    .trim()
+}
+
+function compactBlueprintValue(value) {
+  return cleanBlueprintValue(value)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractBlueprintSection(text, labels) {
+  const labelPattern = labels.map(escapeRegExp).join('|')
+  const startPattern = new RegExp(
+    `(?:^|\\n)\\s*(?:【(?:${labelPattern})】|\\[(?:${labelPattern})\\]|(?:${labelPattern})[：:])\\s*`,
+    'i'
+  )
+  const match = startPattern.exec(text)
+  if (!match) return ''
+
+  const sectionStart = match.index + match[0].length
+  const rest = text.slice(sectionStart)
+  const nextFieldPattern = /\n\s*(?:【[^】]+】|\[[^\]]+\]|(?:Chapter Position|Core Role|Emotional Tone|Characters|Scene Design|Plot Points|Foreshadowing|Suspense Density|Plot Tension|Chapter Summary)\s*[：:]?)/i
+  const nextFieldIndex = rest.search(nextFieldPattern)
+
+  return (nextFieldIndex >= 0 ? rest.slice(0, nextFieldIndex) : rest).trim()
+}
+
+function extractBlueprintPoint(text, labels) {
+  if (!text) return ''
+
+  const labelPattern = labels.map(escapeRegExp).join('|')
+  const pointPattern = new RegExp(
+    `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\d+[.、]\\s*)?(?:${labelPattern})[：:]\\s*([\\s\\S]*?)(?=\\n\\s*(?:[-*]\\s*)?(?:\\d+[.、]\\s*)?(?:开场|发展|转折|收尾|Opening|Development|Turning Point|Conclusion|埋设|强化|回收|Plant|Strengthen|Recover)[：:]|$)`,
+    'i'
+  )
+  const match = text.match(pointPattern)
+  return match ? compactBlueprintValue(match[1]) : ''
+}
+
+function normalizeForeshadowing(section) {
+  const raw = compactBlueprintValue(section)
+
+  return {
+    plant: extractBlueprintPoint(section, ['埋设', 'Plant']),
+    strengthen: extractBlueprintPoint(section, ['强化', 'Strengthen']),
+    recover: extractBlueprintPoint(section, ['回收', 'Recover']),
+    raw
+  }
+}
+
+function normalizePlotPoints(section) {
+  return {
+    opening: extractBlueprintPoint(section, ['开场', 'Opening']),
+    development: extractBlueprintPoint(section, ['发展', 'Development']),
+    turningPoint: extractBlueprintPoint(section, ['转折', 'Turning Point']),
+    conclusion: extractBlueprintPoint(section, ['收尾', 'Conclusion'])
+  }
+}
+
+function stringifyForeshadowing(foreshadowing) {
+  if (!foreshadowing) return ''
+  if (typeof foreshadowing === 'string') return foreshadowing
+  return foreshadowing.raw || [
+    foreshadowing.plant ? `埋设：${foreshadowing.plant}` : '',
+    foreshadowing.strengthen ? `强化：${foreshadowing.strengthen}` : '',
+    foreshadowing.recover ? `回收：${foreshadowing.recover}` : ''
+  ].filter(Boolean).join('\n')
+}
+
+function stringifyPlotPoints(plotPoints) {
+  if (!plotPoints) return ''
+  if (typeof plotPoints === 'string') return plotPoints
+  return [
+    plotPoints.opening ? `开场：${plotPoints.opening}` : '',
+    plotPoints.development ? `发展：${plotPoints.development}` : '',
+    plotPoints.turningPoint ? `转折：${plotPoints.turningPoint}` : '',
+    plotPoints.conclusion ? `收尾：${plotPoints.conclusion}` : ''
+  ].filter(Boolean).join('\n')
+}
+
+function normalizeChapterBlueprintItem(item) {
+  const foreshadowingPlan = normalizeForeshadowing(stringifyForeshadowing(item.foreshadowing ?? item.foreshadowingPlan ?? ''))
+  const plotPointsText = item.plotPointsText || stringifyPlotPoints(item.plotPoints)
+  const plotPoints = item.plotPoints || normalizePlotPoints(plotPointsText)
+
+  return {
+    number: Number.parseInt(item.number ?? item.chapter ?? item.chapterNumber, 10),
+    title: cleanBlueprintValue(item.title || item.chapterTitle || ''),
+    position: compactBlueprintValue(item.position || item.chapterPosition || item.role || ''),
+    purpose: compactBlueprintValue(item.purpose || item.coreRole || item.corePurpose || ''),
+    emotionalTone: compactBlueprintValue(item.emotionalTone || item.tone || ''),
+    characters: compactBlueprintValue(item.characters || item.characterList || ''),
+    sceneDesign: compactBlueprintValue(item.sceneDesign || item.scenes || ''),
+    plotPoints,
+    plotPointsText: compactBlueprintValue(plotPointsText),
+    foreshadowing: stringifyForeshadowing(foreshadowingPlan),
+    foreshadowingPlan,
+    suspense: compactBlueprintValue(item.suspense || item.suspenseDensity || ''),
+    tension: compactBlueprintValue(item.tension || item.plotTension || ''),
+    twistLevel: compactBlueprintValue(item.twistLevel || item.plotTwistLevel || item.tension || item.plotTension || ''),
+    summary: compactBlueprintValue(item.summary || item.chapterSummary || ''),
+    rawText: item.rawText || ''
+  }
+}
+
+function parseChapterBlueprintJson(blueprint) {
+  try {
+    const parsed = JSON.parse(blueprint)
+    const chapters = Array.isArray(parsed) ? parsed : parsed.chapters
+    if (!Array.isArray(chapters)) return []
+    return chapters
+      .map(normalizeChapterBlueprintItem)
+      .filter(chapter => Number.isFinite(chapter.number))
+      .sort((a, b) => a.number - b.number)
+  } catch (error) {
+    return []
+  }
+}
+
 /**
  * Parse chapter blueprint into structured data - 解析章节大纲为结构化数据
  */
 export function parseChapterBlueprint(blueprint) {
+  if (Array.isArray(blueprint)) {
+    return blueprint
+      .map(normalizeChapterBlueprintItem)
+      .filter(chapter => Number.isFinite(chapter.number))
+      .sort((a, b) => a.number - b.number)
+  }
+
   if (!blueprint) return []
 
-  const chapters = []
-  const pattern = /第\s*(\d+)\s*章\s*[-–—]\s*(.+?)(?=\n|$)/g
-  let match
+  const jsonChapters = parseChapterBlueprintJson(blueprint)
+  if (jsonChapters.length > 0) return jsonChapters
 
-  while ((match = pattern.exec(blueprint)) !== null) {
-    const chapterNum = parseInt(match[1])
-    const title = match[2].trim()
-    
-    // Extract chapter details - 提取章节详情
-    const startIndex = match.index
-    const endIndex = blueprint.indexOf(`第 ${chapterNum + 1} 章`, startIndex)
-    const chapterText = endIndex > -1 
-      ? blueprint.substring(startIndex, endIndex)
-      : blueprint.substring(startIndex)
+  const chapters = []
+  const blocks = getChapterBlocks(blueprint)
+
+  for (const block of blocks) {
+    const chapterText = block.rawText
+    const plotPointsText = extractBlueprintSection(chapterText, ['情节要点', 'Plot Points'])
+    const foreshadowingSection = extractBlueprintSection(chapterText, ['伏笔操作', '伏笔设计', 'Foreshadowing'])
+    const foreshadowingPlan = normalizeForeshadowing(foreshadowingSection)
+    const tension = compactBlueprintValue(extractBlueprintSection(chapterText, ['情节张力', 'Plot Tension']))
 
     chapters.push({
-      number: chapterNum,
-      title,
-      position: extractField(chapterText, '本章定位'),
-      purpose: extractField(chapterText, '核心作用'),
-      suspense: extractField(chapterText, '悬念密度'),
-      foreshadowing: extractField(chapterText, '伏笔操作'),
-      twistLevel: extractField(chapterText, '认知颠覆'),
-      summary: extractField(chapterText, '本章简述')
+      number: block.number,
+      title: block.title,
+      position: compactBlueprintValue(extractBlueprintSection(chapterText, ['本章定位', 'Chapter Position'])),
+      purpose: compactBlueprintValue(extractBlueprintSection(chapterText, ['核心作用', 'Core Role'])),
+      emotionalTone: compactBlueprintValue(extractBlueprintSection(chapterText, ['情感基调', 'Emotional Tone'])),
+      characters: compactBlueprintValue(extractBlueprintSection(chapterText, ['出场角色', 'Characters'])),
+      sceneDesign: compactBlueprintValue(extractBlueprintSection(chapterText, ['场景设计', 'Scene Design'])),
+      plotPoints: normalizePlotPoints(plotPointsText),
+      plotPointsText: compactBlueprintValue(plotPointsText),
+      foreshadowing: foreshadowingPlan.raw,
+      foreshadowingPlan,
+      suspense: compactBlueprintValue(extractBlueprintSection(chapterText, ['悬念密度', 'Suspense Density'])),
+      tension,
+      twistLevel: compactBlueprintValue(extractBlueprintSection(chapterText, ['认知颠覆', '转折程度', 'Plot Twist', 'Plot Twist Level'])) || tension,
+      summary: compactBlueprintValue(extractBlueprintSection(chapterText, ['本章简述', '章节简述', 'Chapter Summary'])),
+      rawText: chapterText
     })
   }
 
   return chapters
 }
 
-/**
- * Extract field value from text - 从文本中提取字段值
- */
-function extractField(text, fieldName) {
-  const pattern = new RegExp(`${fieldName}[：:]\\\\s*(.+?)(?=\\\\n|$)`)
-  const match = text.match(pattern)
-  return match ? match[1].trim() : ''
+export function getProjectBlueprintChapters(project) {
+  const structuredBlueprint = project?.chapterBlueprintData
+  if (Array.isArray(structuredBlueprint) && structuredBlueprint.length > 0) {
+    return parseChapterBlueprint(structuredBlueprint)
+  }
+
+  return parseChapterBlueprint(project?.chapterBlueprint)
 }
 
 /**
  * Generate a single chapter draft - 生成单章草稿
  */
 export async function generateChapterDraft(project, chapterNumber, apiConfig, onProgress) {
-  const chapters = parseChapterBlueprint(project.chapterBlueprint)
+  const chapters = getProjectBlueprintChapters(project)
   const chapterInfo = chapters.find(c => c.number === chapterNumber)
   
   if (!chapterInfo) {
@@ -381,9 +543,14 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
       chapterTitle: chapterInfo.title,
       chapterRole: chapterInfo.position,
       chapterPurpose: chapterInfo.purpose,
+      emotionalTone: chapterInfo.emotionalTone,
+      charactersInvolved: chapterInfo.characters,
+      sceneDesign: chapterInfo.sceneDesign,
+      plotPoints: chapterInfo.plotPointsText,
       suspenseLevel: chapterInfo.suspense,
       foreshadowing: chapterInfo.foreshadowing,
       plotTwistLevel: chapterInfo.twistLevel,
+      plotTension: chapterInfo.tension,
       chapterSummary: chapterInfo.summary,
       novelSetting,
       wordNumber: project.wordNumber,
@@ -452,7 +619,7 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
         // 用 assembleChapterContext 组装精简上下文
         contextForDraft = assembleChapterContext({
           chapterNumber,
-          chapterOutline: chapterInfo.summary,
+          chapterOutline: chapterInfo.rawText || chapterInfo.summary,
           novelTitle: project.title,
           genre: formatGenre(project.genre),
           recentSummaries: project.chapterSummaries,
@@ -490,9 +657,14 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
       chapterTitle: chapterInfo.title,
       chapterRole: chapterInfo.position,
       chapterPurpose: chapterInfo.purpose,
+      emotionalTone: chapterInfo.emotionalTone,
+      charactersInvolved: chapterInfo.characters,
+      sceneDesign: chapterInfo.sceneDesign,
+      plotPoints: chapterInfo.plotPointsText,
       suspenseLevel: chapterInfo.suspense,
       foreshadowing: chapterInfo.foreshadowing,
       plotTwistLevel: chapterInfo.twistLevel,
+      plotTension: chapterInfo.tension,
       chapterSummary: chapterInfo.summary,
       wordNumber: project.wordNumber,
       globalSummary: globalSummaryText,
@@ -543,7 +715,7 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
       chapterNumber,
       previousChapterSummary,
       arcSummary: project.currentArcSummary || '',
-      chapterOutline: project.chapterBlueprint || ''
+      chapterOutline: getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
     })))
     
     // 解析 JSON 响应
@@ -559,7 +731,7 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
     console.error('章节摘要生成失败:', e)
     // 降级：使用旧版摘要方式
     try {
-      const { summary: legacySummaryPrompt } = utilityPromptsV3
+      const { summary: legacySummaryPrompt } = utilityPrompts
       const legacySummary = cleanResponse(await chatCompletion(apiConfig, legacySummaryPrompt({
         chapterText,
         globalSummary: project.globalSummary || ''
@@ -663,7 +835,7 @@ export function exportNovelToText(project) {
   // Chapters - 章节内容
   const chapters = project.chapters || {}
   const chapterNums = Object.keys(chapters).map(Number).sort((a, b) => a - b)
-  const blueprintChapters = parseChapterBlueprint(project.chapterBlueprint)
+  const blueprintChapters = getProjectBlueprintChapters(project)
 
   for (const num of chapterNums) {
     const info = blueprintChapters.find(c => c.number === num)
@@ -698,7 +870,7 @@ export function exportNovelToMarkdown(project) {
   // Chapters - 章节内容
   const chapters = project.chapters || {}
   const chapterNums = Object.keys(chapters).map(Number).sort((a, b) => a - b)
-  const blueprintChapters = parseChapterBlueprint(project.chapterBlueprint)
+  const blueprintChapters = getProjectBlueprintChapters(project)
 
   for (const num of chapterNums) {
     const info = blueprintChapters.find(c => c.number === num)

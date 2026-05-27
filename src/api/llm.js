@@ -164,8 +164,9 @@ async function streamCompletion(channel, requestConfig, timeout, onStream) {
 export function cleanResponse(text) {
   if (!text) return ''
   
-  // Remove markdown code blocks - 移除 markdown 代码块
-  let cleaned = text.replace(/```[\s\S]*?```/g, '')
+  // Remove markdown fences but keep their content. JSON prompts often return fenced blocks.
+  let cleaned = text.replace(/```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)```/g, '$1')
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1')
   cleaned = cleaned.replace(/`/g, '')
   
   // Trim whitespace - 去除空白

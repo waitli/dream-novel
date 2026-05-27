@@ -1,126 +1,126 @@
 # AI 小说生成器
-[体验地址](https://novel.waitli.top/)
-一个基于雪花写作法的 AI 小说创作工具，支持智能生成小说架构、角色体系、世界观和章节内容。基于huobao-novel，我fork和修改的原因：第一部署到cloudflare，还有就是我自己在使用中会有一些问题要修改，不过再次鸣谢@[huobao-novel](https://github.com/chatfire-AI/huobao-novel)
+
+在线体验: <https://novel.waitli.top/>
+
+基于雪花写作法的 AI 小说创作工具，支持从核心创意到架构、大纲、章节正文的一整套写作流程。项目由 [huobao-novel](https://github.com/chatfire-AI/huobao-novel) 演化而来，已适配 Cloudflare Pages 部署、多模型接入和中英双语界面。
 
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
 ![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-## 📸 截图
+## 截图
 
-### 首页
 ![首页](./doc/home.png)
 
+## 特性
 
-## ✨ 特性
+- 雪花写作法流程：核心种子、角色动力学、世界观、情节架构
+- 章节大纲与章节正文生成，支持流式输出
+- 灵感罗盘：关系图谱、时间线和逻辑审计
+- 多项目管理，本地持久化保存
+- 深色模式与中英双语切换
+- 多模型阶段配置，适合不同创作环节
+- 支持 TXT / Markdown 导出
+- 纯前端部署，API Key 仅保存在浏览器本地
 
-- 📖 **雪花写作法** - 从核心种子开始，逐步扩展角色、世界观、情节架构
-- 🎭 **角色弧光理论** - 设计具有动态变化潜力的角色，包含驱动力三角和关系冲突网
-- 🌍 **世界观构建** - AI 自动生成符合故事背景的世界设定
-- 📊 **悬念节奏曲线** - 智能规划章节节奏，保持读者阅读兴趣
-- ✍️ **章节写作** - 基于大纲逐章生成小说内容，支持流式输出
-- 📤 **多格式导出** - 支持导出为 TXT 和 Markdown 格式
-- 🌓 **深色/浅色主题** - 支持主题切换，保护眼睛
-- 💾 **本地项目存储** - 项目数据本地持久化，支持多项目管理
+## 技术栈
 
-## 🚀 快速开始
+- Vue 3
+- Vite
+- Naive UI
+- Tailwind CSS
+- Pinia
+- Vue Router
+- Axios
+- ECharts
+
+## 快速开始
 
 ### 环境要求
 
-- Node.js >= 18
-- pnpm / npm / yarn
+- Node.js 18+
+- npm
 
-### 安装
+### 安装与运行
 
 ```bash
-# 克隆项目
-git clone https://github.com/chatfire-AI/huobao-novel.git
-cd huobao-novel
-
-# 安装依赖
-pnpm install
-# 或
+git clone https://github.com/waitli/dream-novel.git
+cd dream-novel
 npm install
-
-# 启动开发服务器
-pnpm dev
-# 或
 npm run dev
 ```
 
 ### 构建
 
 ```bash
-pnpm build
-# 或
 npm run build
 ```
 
-## ⚙️ 配置
+## 配置
 
-首次使用需要配置 API：
+首次使用时，点击右上角设置图标并填写：
 
-1. 点击右上角设置图标 ⚙️
-2. 填入 API Base URL 和 API Key
-3. 选择需要使用的模型
+1. `API Base URL`
+2. `API Key`
+3. 默认模型
+4. 各环节模型（可选）
 
-添加了多种支持支持 OpenAI 兼容的 API 接口。
+默认接入方式是 OpenAI 兼容接口，基础配置已预设为 `https://api.chatfire.site/v1`。
 
-## 📝 创作流程
+### 支持的 LLM 渠道
 
-| 步骤 | 描述 |
-|------|------|
-| **创建项目** | 设置小说标题、题材、章节数、每章字数等基本信息 |
-| **生成架构** | AI 自动生成核心种子、角色动力学、世界观、情节架构 |
-| **生成大纲** | 基于架构生成详细的章节大纲 |
-| **章节写作** | 逐章生成小说内容，支持批量生成 |
-| **导出小说** | 将完成的小说导出为 TXT 或 Markdown 文件 |
+| 渠道 | 说明 |
+| --- | --- |
+| Chatfire | 默认渠道，OpenAI 兼容接口 |
+| OpenAI | 标准 OpenAI 接口 |
+| Google Gemini | OpenAI 兼容接入 |
+| Anthropic Claude | 使用 `/messages` 接口 |
+| Azure OpenAI | 使用 Azure 专用部署地址 |
+| Moonshot Kimi | OpenAI 兼容接入 |
+| DeepSeek | OpenAI 兼容接入 |
+| 百川智能 | OpenAI 兼容接入 |
+| 智谱 AI | OpenAI 兼容接入 |
+| 自定义 API | 任意兼容 OpenAI 的接口 |
 
-## 🛠️ 技术栈
+## 中英双语
 
-- **框架**: [Vue 3](https://vuejs.org/) + [Vite](https://vitejs.dev/)
-- **UI 组件**: [Naive UI](https://www.naiveui.com/)
-- **样式**: [Tailwind CSS](https://tailwindcss.com/)
-- **状态管理**: [Pinia](https://pinia.vuejs.org/)
-- **图标**: [@vicons/ionicons5](https://www.xicons.org/)
-- **路由**: [Vue Router](https://router.vuejs.org/)
-- **HTTP**: [Axios](https://axios-http.com/)
+项目已内置中英双语界面：
 
-## 📁 项目结构
+- 中文、英文可在界面中切换
+- 语言选择会保存到浏览器本地
+- 界面文案会随语言同步切换
 
+## 部署到 Cloudflare Pages
+
+推荐使用 Cloudflare Pages 直接部署前端静态站点：
+
+```bash
+npm run build
+npm run deploy:pages
 ```
+
+说明：
+
+- `vite.config.js` 已设置根路径 `base: '/'`
+- 路由使用根路径 history 模式
+- SPA 刷新问题已通过静态资源配置处理
+
+## 项目结构
+
+```text
 src/
-├── api/          # API 请求封装
-├── assets/       # 静态资源
-├── components/   # 组件
-│   ├── ArchitecturePanel.vue      # 小说架构面板
-│   ├── ChapterBlueprintPanel.vue  # 章节大纲面板
-│   ├── ChapterWriterPanel.vue     # 章节写作面板
-│   ├── CreateProjectDialog.vue    # 创建项目对话框
-│   ├── ProjectCard.vue            # 项目卡片
-│   └── SettingsDialog.vue         # 设置对话框
-├── prompts/      # AI 提示词模板
-├── router/       # 路由配置
-├── stores/       # 状态管理
-├── views/        # 页面视图
-│   ├── HomeView.vue     # 首页
-│   └── ProjectView.vue  # 项目详情页
-└── main.js       # 入口文件
+├── api/        # LLM 和生成流程封装
+├── assets/     # 静态资源
+├── components/ # 页面组件与功能面板
+├── i18n/       # 国际化配置
+├── locales/    # 中英文语言包
+├── prompts/    # 小说生成提示词
+├── router/     # 路由配置
+├── stores/     # Pinia 状态管理
+├── utils/      # 工具函数
+└── views/      # 页面视图
 ```
 
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 提交 Pull Request
-
-## 联系我
-
-
-## 📄 License
+## 许可
 
 [MIT](./LICENSE)

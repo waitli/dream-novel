@@ -235,15 +235,19 @@ export const firstDraft = (params) => `
 ## 本章大纲（必须严格遵循）
 【本章定位】${params.chapterRole}
 【核心作用】${params.chapterPurpose}
+【情感基调】${params.emotionalTone || '(未指定)'}
+【出场角色】${params.charactersInvolved || '(未指定)'}
+【场景设计】${params.sceneDesign || '(未指定)'}
+【情节要点】${params.plotPoints || '(未指定)'}
 【悬念密度】${params.suspenseLevel}
 【伏笔操作】${params.foreshadowing}
-【认知颠覆】${params.plotTwistLevel}
+【情节张力】${params.plotTension || params.plotTwistLevel || '(未指定)'}
 【本章简述】${params.chapterSummary}
 
 ## 可用元素
 - 核心人物：${params.charactersInvolved || '(未指定)'}
 - 关键道具：${params.keyItems || '(未指定)'}
-- 空间坐标：${params.sceneLocation || '(未指定)'}
+- 空间坐标：${params.sceneLocation || params.sceneDesign || '(未指定)'}
 - 时间压力：${params.timeConstraint || '(未指定)'}
 
 ## 小说设定
@@ -290,9 +294,13 @@ export const nextDraft = (params) => `
 ## 本章大纲（必须严格遵循）
 【本章定位】${params.chapterRole}
 【核心作用】${params.chapterPurpose}
+【情感基调】${params.emotionalTone || '(未指定)'}
+【出场角色】${params.charactersInvolved || '(未指定)'}
+【场景设计】${params.sceneDesign || '(未指定)'}
+【情节要点】${params.plotPoints || '(未指定)'}
 【悬念密度】${params.suspenseLevel}
 【伏笔设计】${params.foreshadowing}
-【转折程度】${params.plotTwistLevel}
+【情节张力】${params.plotTension || params.plotTwistLevel || '(未指定)'}
 【章节简述】${params.chapterSummary}
 
 ## 上下文信息

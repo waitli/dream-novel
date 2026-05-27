@@ -29,6 +29,7 @@ export const useNovelStore = defineStore('novel', () => {
       characterState: '',
       // Chapter blueprint - 章节大纲
       chapterBlueprint: '',
+      chapterBlueprintData: [],
       // Chapters content (key: chapter number, value: chapter text) - 章节内容
       chapters: {},
       // Global summary - 前文摘要
