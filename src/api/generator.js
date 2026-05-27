@@ -505,7 +505,7 @@ export function getProjectBlueprintChapters(project) {
 /**
  * Generate a single chapter draft - 生成单章草稿
  */
-export async function generateChapterDraft(project, chapterNumber, apiConfig, onProgress) {
+export async function generateChapterDraft(project, chapterNumber, apiConfig, onProgress, onStream = null) {
   const chapters = getProjectBlueprintChapters(project)
   const chapterInfo = chapters.find(c => c.number === chapterNumber)
   
@@ -684,7 +684,7 @@ export async function generateChapterDraft(project, chapterNumber, apiConfig, on
     })
   }
 
-  const chapterText = cleanResponse(await chatCompletion(apiConfig, prompt))
+  const chapterText = cleanResponse(await chatCompletion(apiConfig, prompt, onStream))
   onProgress(`第 ${chapterNumber} 章草稿生成完成`, 1, 3)
 
   return chapterText
@@ -1358,13 +1358,13 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
 /**
  * Enrich chapter text - 扩写章节
  */
-export async function enrichChapter(chapterText, wordNumber, apiConfig, onProgress) {
+export async function enrichChapter(chapterText, wordNumber, apiConfig, onProgress, onStream = null) {
   onProgress('正在扩写章节...', 0, 1)
   
   const enrichedText = cleanResponse(await chatCompletion(apiConfig, enrichChapterPrompt({
     chapterText,
     wordNumber
-  })))
+  }), onStream))
 
   onProgress('扩写完成', 1, 1)
   return enrichedText || chapterText

@@ -207,21 +207,31 @@ async function handleGenerate() {
     if (!confirmed) return
   }
 
+  const previousContent = chapterContent.value
   try {
     emit('update:isGenerating', true)
+    chapterContent.value = ''
     
     const draft = await generateChapterDraft(
       props.project,
       currentChapter.value,
       settings.getStageConfig('chapter'),
-      (step) => { generationStep.value = step }
+      (step) => { generationStep.value = step },
+      (chunk, fullContent) => {
+        chapterContent.value = fullContent
+      }
     )
 
     chapterContent.value = draft
     message.success(`第 ${currentChapter.value} 章草稿生成完成`)
   } catch (error) {
     console.error('Generation error:', error)
-    message.error('生成失败: ' + error.message)
+    if (!chapterContent.value && previousContent) {
+      chapterContent.value = previousContent
+    }
+    message.error(chapterContent.value
+      ? '生成中断，已保留当前已生成内容: ' + error.message
+      : '生成失败: ' + error.message)
   } finally {
     emit('update:isGenerating', false)
     generationStep.value = ''
@@ -353,21 +363,33 @@ async function handleEnrich() {
     return
   }
 
+  const originalContent = chapterContent.value
+  let streamedContent = ''
+
   try {
     emit('update:isGenerating', true)
     
     const enriched = await enrichChapter(
-      chapterContent.value,
+      originalContent,
       props.project.wordNumber,
       settings.getStageConfig('enrich'),
-      (step) => { generationStep.value = step }
+      (step) => { generationStep.value = step },
+      (chunk, fullContent) => {
+        streamedContent = fullContent
+        chapterContent.value = fullContent
+      }
     )
 
     chapterContent.value = enriched
     message.success('扩写完成')
   } catch (error) {
     console.error('Enrich error:', error)
-    message.error('扩写失败: ' + error.message)
+    if (!chapterContent.value && originalContent) {
+      chapterContent.value = originalContent
+    }
+    message.error(streamedContent
+      ? '扩写中断，已保留当前已生成内容: ' + error.message
+      : '扩写失败: ' + error.message)
   } finally {
     emit('update:isGenerating', false)
     generationStep.value = ''
