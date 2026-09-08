@@ -70,12 +70,16 @@ export const useNovelStore = defineStore('novel', () => {
   function updateProject(id, updates) {
     const index = projects.value.findIndex(p => p.id === id)
     if (index !== -1) {
-      projects.value[index] = {
+      const nextProject = {
         ...projects.value[index],
         ...updates,
         updatedAt: new Date().toISOString()
       }
-      saveToStorage()
+      const nextProjects = [...projects.value]
+      nextProjects[index] = nextProject
+      // Publish in-memory success only after persistence succeeds.
+      localStorage.setItem('novel_projects', JSON.stringify(nextProjects))
+      projects.value = nextProjects
       if (currentProject.value?.id === id) {
         currentProject.value = projects.value[index]
       }

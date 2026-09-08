@@ -1,366 +1,126 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSpace, NCollapse, NCollapseItem, NAlert, useMessage } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
-import { useMessage } from 'naive-ui'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSpace, NIcon, NTooltip, NSelect, NAutoComplete } from 'naive-ui'
-import { HelpCircleOutline } from '@vicons/ionicons5'
+import { DEFAULT_API_CONFIG, normalizeApiConfig, validateApiConfig } from '../utils/api-config.js'
+import { chatCompletion } from '../api/llm.js'
 
-const props = defineProps({
-  modelValue: Boolean
-})
-
+const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue'])
-
-const settings = useSettingsStore()
+const settings = useSettingsStore(), message = useMessage()
 const { t } = useI18n()
-const message = useMessage()
-
-// Channel configurations
-const channels = [
-  { 
-    id: 'chatfire', 
-    name: 'Chatfire',
-    baseUrl: 'https://api.chatfire.site/v1',
-    defaultMaxTokens: 8192,
-    models: [
-      'deepseek-v4-flash',
-      'deepseek-v4-pro',
-      'gemini-3-flash-preview',
-      'doubao-seed-1-8-251228',
-      'gemini-3-pro-preview',
-      'gpt-4o',
-      'claude-sonnet-4-5-20250929',
-      'kimi-k2-thinking'
-    ],
-    getApiKeyUrl: 'https://api.chatfire.site/login?inviteCode=EEE80324'
-  },
-  { 
-    id: 'openai', 
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    defaultMaxTokens: 8192,
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'],
-    getApiKeyUrl: 'https://platform.openai.com/api-keys'
-  },
-  { 
-    id: 'gemini', 
-    name: 'Google Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultMaxTokens: 8192,
-    models: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
-    getApiKeyUrl: 'https://aistudio.google.com/app/apikey'
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    baseUrl: 'https://api.anthropic.com/v1',
-    defaultMaxTokens: 8192,
-    models: ['claude-sonnet-4-5-20250929', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
-    getApiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    isClaude: true
-  },
-  {
-    id: 'azure',
-    name: 'Azure OpenAI',
-    baseUrl: 'https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}',
-    defaultMaxTokens: 8192,
-    models: ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
-    getApiKeyUrl: 'https://portal.azure.com/',
-    isAzure: true
-  },
-  {
-    id: 'moonshot',
-    name: 'Moonshot Kimi',
-    baseUrl: 'https://api.moonshot.cn/v1',
-    defaultMaxTokens: 8192,
-    models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
-    getApiKeyUrl: 'https://platform.moonshot.cn/console/api-keys'
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    defaultMaxTokens: 32768,
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder'],
-    getApiKeyUrl: 'https://platform.deepseek.com/api_keys'
-  },
-  {
-    id: 'baichuan',
-    name: 'Baichuan AI',
-    baseUrl: 'https://api.baichuan-ai.com/v1',
-    defaultMaxTokens: 8192,
-    models: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan2-Turbo'],
-    getApiKeyUrl: 'https://platform.baichuan-ai.com/console/apikey'
-  },
-  {
-    id: 'zhipu',
-    name: 'Zhipu AI',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultMaxTokens: 8192,
-    models: ['glm-4', 'glm-4-air', 'glm-3-turbo'],
-    getApiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
-  },
-  {
-    id: 'custom',
-    name: 'Custom API',
-    baseUrl: '',
-    defaultMaxTokens: 8192,
-    models: [],
-    getApiKeyUrl: '',
-    isCustom: true
-  }
-]
-
-// Current channel
-const currentChannel = ref('deepseek')
-
-// Channel options for select
-const channelOptions = computed(() => channels.map(c => ({ label: c.name, value: c.id })))
-
-// Current channel models
-const currentChannelModels = computed(() => {
-  const channel = channels.find(c => c.id === currentChannel.value)
-  return channel?.models.map(m => ({ label: m, value: m })) || []
+const localConfig = ref({ ...DEFAULT_API_CONFIG })
+const localStageModels = ref({})
+const testing = ref(false), testResult = ref('')
+const legacy = computed(() => ['azure', 'anthropic'].includes(localConfig.value.channel))
+const copy = computed(() => settings.locale === 'en-US' ? {
+  intro: 'One connection for the whole writing workflow. DeepSeek is prefilled; you can use another OpenAI-compatible endpoint.',
+  legacy: 'Your existing native API configuration is preserved. Switching to a compatible endpoint requires its URL and API key.',
+  switch: 'Use a compatible API', advanced: 'Advanced settings (optional)', test: 'Test connection',
+  testHint: 'Sends a short request using your selected model. Usage may be charged by your provider.',
+  passed: 'Connection successful', failed: 'Connection failed', temperature: 'Temperature', timeout: 'Timeout (seconds)',
+  storage: 'Settings could not be saved. Please check browser storage.',
+  model: 'Enter the model ID supplied by your API provider'
+} : {
+  intro: '一次配置用于全部创作环节。默认填入 DeepSeek，也可使用其他 OpenAI 兼容接口。',
+  legacy: '已保留你的旧版原生接口配置。切换到兼容接口后，需要填写对应的地址和密钥。',
+  switch: '切换到兼容接口', advanced: '高级设置（可选）', test: '测试连接',
+  testHint: '会使用所选模型发送一条简短请求，接口提供方可能收取用量费用。',
+  passed: '连接成功', failed: '连接失败', temperature: '创作温度', timeout: '超时（秒）',
+  storage: '设置保存失败，请检查浏览器存储空间。',
+  model: '填写接口提供方给出的模型名称'
 })
-
-// Initialize with default values
-const localConfig = ref({
-  channel: 'deepseek',
-  baseUrl: 'https://api.deepseek.com',
-  apiKey: '',
-  model: 'deepseek-v4-flash',
-  temperature: 0.7,
-  maxTokens: 32768,
-  timeout: 600
-})
-
-// Azure config
-const azureConfig = ref({
-  resourceName: '',
-  deploymentId: '',
-  apiVersion: '2024-02-15-preview'
-})
-
-// Handle channel change
-function handleChannelChange(channelId) {
-  currentChannel.value = channelId
-  const channel = channels.find(c => c.id === channelId)
-  if (channel) {
-    localConfig.value.channel = channelId
-    if (!channel.isCustom) {
-      localConfig.value.baseUrl = channel.baseUrl
-    }
-    localConfig.value.model = channel.models[0] || ''
-    localConfig.value.maxTokens = channel.defaultMaxTokens || 8192
-  }
-}
-
-// Get current channel's get key URL
-function getCurrentGetKeyUrl() {
-  const channel = channels.find(c => c.id === currentChannel.value)
-  return channel?.getApiKeyUrl || ''
-}
-
-// Stage-specific models
-const localStageModels = ref({
-  architecture: '',
-  blueprint: '',
-  chapter: '',
-  finalize: '',
-  enrich: ''
-})
-
-// Stage labels - computed dynamically
 const stageLabels = computed(() => ({
-  architecture: t('settings.stages.architecture'),
-  blueprint: t('settings.stages.blueprint'),
-  chapter: t('settings.stages.chapter'),
-  finalize: t('settings.stages.finalize'),
-  enrich: t('settings.stages.enrich')
+  architecture: t('settings.stages.architecture'), blueprint: t('settings.stages.blueprint'),
+  chapter: t('settings.stages.chapter'), finalize: t('settings.stages.finalize'), enrich: t('settings.stages.enrich')
 }))
-
-// Sync local config when dialog opens
-watch(() => props.modelValue, (val) => {
-  if (val) {
-    localConfig.value = { ...settings.apiConfig }
-    localStageModels.value = { ...settings.stageModels }
-    currentChannel.value = localConfig.value.channel || 'deepseek'
-  }
+watch(() => props.modelValue, show => {
+  if (!show) return
+  localConfig.value = normalizeApiConfig(settings.apiConfig)
+  localStageModels.value = { ...settings.stageModels }
+  testResult.value = ''
 }, { immediate: true })
-
-// Save settings
-function saveSettings() {
-  if (!localConfig.value.apiKey) {
-    message.warning(t('messages.pleaseEnterApiKey'))
-    return
-  }
-  
-  // Azure special handling
-  if (currentChannel.value === 'azure') {
-    if (!azureConfig.value.resourceName || !azureConfig.value.deploymentId) {
-      message.warning(t('messages.azureConfigRequired'))
-      return
-    }
-    // Build Azure URL
-    localConfig.value.baseUrl = `https://${azureConfig.value.resourceName}.openai.azure.com/openai/deployments/${azureConfig.value.deploymentId}`
-    settings.updateAzureConfig({
-      ...localConfig.value,
-      ...azureConfig.value
-    })
-  } else {
-    settings.updateApiConfig(localConfig.value)
-  }
-  
-  settings.updateStageModels(localStageModels.value)
-  message.success(t('messages.settingsSaved'))
-  emit('update:modelValue', false)
+watch(localConfig, () => { testResult.value = '' }, { deep: true })
+function switchToCompatible() {
+  localConfig.value = { ...DEFAULT_API_CONFIG }
+  localStageModels.value = Object.fromEntries(Object.keys(stageLabels.value).map(key => [key, '']))
 }
-
-
+async function testConnection() {
+  if (testing.value) return
+  try {
+    const config = validateApiConfig(localConfig.value)
+    testing.value = true
+    testResult.value = ''
+    await chatCompletion({ ...config, timeout: 30 }, 'Reply only with OK.')
+    testResult.value = copy.value.passed
+    message.success(copy.value.passed)
+  } catch (error) {
+    testResult.value = copy.value.failed + ': ' + error.message
+    message.error(testResult.value)
+  } finally { testing.value = false }
+}
+function saveSettings() {
+  try {
+    const config = validateApiConfig(localConfig.value)
+    settings.updateApiConfig(config)
+    settings.updateStageModels(Object.fromEntries(Object.entries(localStageModels.value).map(([key, value]) => [key, String(value || '').trim()])))
+    message.success(t('messages.settingsSaved'))
+    emit('update:modelValue', false)
+  } catch (error) { message.error(error.message || copy.value.storage) }
+}
 </script>
 
 <template>
-  <n-modal
-    :show="modelValue"
-    @update:show="emit('update:modelValue', $event)"
-    :mask-closable="false"
-    preset="card"
-    :title="t('settings.title')"
-    style="width: 520px"
-    :bordered="false"
-    class="!rounded-2xl"
-  >
-    <n-form label-placement="top" class="space-y-1">
-      <!-- Channel Select -->
-      <n-form-item :label="t('settings.channel')">
-        <n-select
-          :value="currentChannel"
-          :options="channelOptions"
-          @update:value="handleChannelChange"
-        />
-      </n-form-item>
-
-      <!-- API Base URL -->
-      <n-form-item 
-        v-if="currentChannel !== 'azure'"
-        :label="t('settings.apiBaseUrl')"
-      >
-        <n-input 
-          v-model:value="localConfig.baseUrl" 
-          :placeholder="currentChannel === 'custom' ? t('settings.apiBaseUrl') : channels.find(c => c.id === currentChannel)?.baseUrl"
-          :disabled="currentChannel !== 'custom'"
-        />
-      </n-form-item>
-
-      <!-- Azure special config -->
-      <template v-if="currentChannel === 'azure'">
-        <n-form-item :label="t('settings.azureResourceName')">
-          <n-input 
-            v-model:value="azureConfig.resourceName" 
-            :placeholder="t('settings.azureResourceNamePlaceholder')"
-          />
-        </n-form-item>
-        <n-form-item :label="t('settings.azureDeploymentId')">
-          <n-input 
-            v-model:value="azureConfig.deploymentId" 
-            :placeholder="t('settings.azureDeploymentIdPlaceholder')"
-          />
-        </n-form-item>
-        <n-form-item :label="t('settings.azureApiVersion')">
-          <n-input 
-            v-model:value="azureConfig.apiVersion" 
-            placeholder="2024-02-15-preview"
-          />
-        </n-form-item>
+  <n-modal :show="modelValue" @update:show="emit('update:modelValue', $event)" :mask-closable="false"
+    :closable="!testing" preset="card" :title="t('settings.title')" :bordered="false"
+    style="width: min(520px, calc(100vw - 32px)); max-height: 90vh; overflow: auto" class="!rounded-2xl">
+    <p class="text-sm text-gray-500 mb-4">{{ copy.intro }}</p>
+    <n-alert v-if="legacy" type="warning" class="mb-4">
+      {{ copy.legacy }}
+      <n-button size="small" class="mt-2" :disabled="testing" @click="switchToCompatible">{{ copy.switch }}</n-button>
+    </n-alert>
+    <n-form label-placement="top" :disabled="testing">
+      <template v-if="localConfig.channel === 'azure'">
+        <n-form-item :label="t('settings.azureResourceName')"><n-input v-model:value="localConfig.resourceName" /></n-form-item>
+        <n-form-item :label="t('settings.azureDeploymentId')"><n-input v-model:value="localConfig.deploymentId" /></n-form-item>
+        <n-form-item :label="t('settings.azureApiVersion')"><n-input v-model:value="localConfig.apiVersion" /></n-form-item>
       </template>
-
-      <!-- API Key -->
+      <n-form-item v-else :label="t('settings.apiBaseUrl')">
+        <n-input v-model:value="localConfig.baseUrl" placeholder="https://api.deepseek.com" />
+      </n-form-item>
       <n-form-item :label="t('settings.apiKey')">
-        <n-input 
-          v-model:value="localConfig.apiKey" 
-          type="password"
-          :placeholder="t('settings.apiKeyPlaceholder')"
-          show-password-on="click"
-        />
+        <n-input v-model:value="localConfig.apiKey" type="password" :placeholder="t('settings.apiKeyPlaceholder')" show-password-on="click" />
       </n-form-item>
-
-      <!-- Default Model -->
-      <n-form-item>
-        <template #label>
-          <div class="flex items-center gap-1">
-            <span>{{ t('settings.defaultModel') }}</span>
-            <n-tooltip trigger="hover">
-              <template #trigger>
-                <n-icon class="text-gray-400 cursor-help" :size="14">
-                  <HelpCircleOutline />
-                </n-icon>
-              </template>
-              {{ t('settings.modelHint') }}
-            </n-tooltip>
-          </div>
-        </template>
-        <n-auto-complete
-          v-model:value="localConfig.model"
-          :options="currentChannelModels"
-          :get-show="() => true"
-          :placeholder="t('settings.defaultModel')"
-          clearable
-        />
+      <n-form-item v-if="localConfig.channel !== 'azure'" :label="t('settings.defaultModel')">
+        <n-input v-model:value="localConfig.model" :placeholder="copy.model" />
       </n-form-item>
-
-      <!-- Max Tokens -->
-      <n-form-item :label="t('settings.maxTokens')">
-        <n-input-number
-          v-model:value="localConfig.maxTokens"
-          :min="1024"
-          :max="384000"
-          :step="1024"
-          class="w-full"
-          :placeholder="t('settings.maxTokensPlaceholder')"
-        />
-      </n-form-item>
-
-      <!-- Stage-specific Models -->
-      <div class="mt-4">
-        <div class="flex items-center gap-1 mb-3">
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('settings.stageModels') }}</span>
-          <n-tooltip trigger="hover">
-            <template #trigger>
-              <n-icon class="text-gray-400 cursor-help" :size="14">
-                <HelpCircleOutline />
-              </n-icon>
-            </template>
-            {{ t('settings.stageModelsHint') }}
-          </n-tooltip>
-        </div>
-        
-        <!-- Stage models grid layout -->
-        <div class="grid grid-cols-1 gap-3">
-          <div v-for="(label, key) in stageLabels" :key="key" class="space-y-1">
-            <label class="text-xs text-gray-500 dark:text-gray-400">{{ label }}</label>
-            <n-auto-complete
-              v-model:value="localStageModels[key]"
-              :options="currentChannelModels"
-              :get-show="() => true"
-              :placeholder="t('settings.stageModelsHint')"
-              clearable
-            />
-          </div>
-        </div>
-      </div>
+      <n-collapse>
+        <n-collapse-item :title="copy.advanced" name="advanced">
+          <n-form-item :label="t('settings.maxTokens')">
+            <n-input-number v-model:value="localConfig.maxTokens" :min="1" :max="384000" :step="1024" class="w-full" />
+          </n-form-item>
+          <n-form-item :label="copy.temperature">
+            <n-input-number v-model:value="localConfig.temperature" :min="0" :max="2" :step="0.1" class="w-full" />
+          </n-form-item>
+          <n-form-item :label="copy.timeout">
+            <n-input-number v-model:value="localConfig.timeout" :min="1" :max="3600" class="w-full" />
+          </n-form-item>
+          <p class="text-sm text-gray-500 mb-3">{{ t('settings.stageModelsHint') }}</p>
+          <n-form-item v-for="(label, key) in stageLabels" :key="key" :label="label">
+            <n-input v-model:value="localStageModels[key]" :placeholder="localConfig.model" clearable />
+          </n-form-item>
+        </n-collapse-item>
+      </n-collapse>
     </n-form>
-
+    <p class="text-xs text-gray-500 mt-4">{{ copy.testHint }}</p>
+    <p v-if="testResult" role="status" class="text-sm mt-2 break-words">{{ testResult }}</p>
     <template #footer>
-      <div class="flex justify-between">
+      <div class="flex justify-between gap-2 flex-wrap">
+        <n-button :loading="testing" @click="testConnection">{{ copy.test }}</n-button>
         <n-space>
-          <n-button @click="() => { const url = getCurrentGetKeyUrl(); if(url) window.open(url, '_blank'); else message.warning(t('messages.noGetKeyUrl')) }" tertiary>
-            {{ t('settings.getApiKey') }}
-          </n-button>
-        </n-space>
-        <n-space>
-          <n-button @click="emit('update:modelValue', false)">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" @click="saveSettings">{{ t('common.save') }}</n-button>
+          <n-button :disabled="testing" @click="emit('update:modelValue', false)">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :disabled="testing" @click="saveSettings">{{ t('common.save') }}</n-button>
         </n-space>
       </div>
     </template>

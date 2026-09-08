@@ -1,5 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef, watch, onBeforeUnmount } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { readChapterDraft, writeChapterDraft, removeChapterDraft } from '../utils/chapter-drafts.js'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
@@ -27,6 +29,118 @@ const chapterContent = ref('')
 const generationStep = ref('')
 const graphGenerating = ref(false)
 const graphStep = ref('')
+const activeTask = shallowRef(null)
+const isWorking = computed(() => props.isGenerating || Boolean(activeTask.value))
+const draftDirty = ref(false), draftError = ref(''), draftSavedAt = ref('')
+let draftTimer = null, restoringDraft = false, loadedProjectId = props.project?.id
+let lastDraftContent = ''
+
+function flushDraft() {
+  clearTimeout(draftTimer)
+  draftTimer = null
+  if (!draftDirty.value || !loadedProjectId) return true
+  try {
+    const saved = writeChapterDraft(localStorage, loadedProjectId, currentChapter.value, chapterContent.value)
+    lastDraftContent = chapterContent.value
+    draftSavedAt.value = saved.updatedAt
+    draftDirty.value = false
+    draftError.value = ''
+    return true
+  } catch {
+    draftError.value = '草稿暂存失败，请保留页面并复制正文备份，检查浏览器存储空间。'
+    return false
+  }
+}
+watch(chapterContent, () => {
+  if (restoringDraft) return
+  draftDirty.value = chapterContent.value !== lastDraftContent
+  if (draftDirty.value && !draftTimer) draftTimer = setTimeout(flushDraft, 600)
+}, { flush: 'sync' })
+
+function restoreChapter(num) {
+  let draft = null
+  try { draft = readChapterDraft(localStorage, props.project.id, num) } catch (error) { message.error(error.message); return false }
+  restoringDraft = true
+  loadedProjectId = props.project.id
+  currentChapter.value = num
+  const savedAt = props.project.chapterMeta?.[num]?.updatedAt || ''
+  const useDraft = draft && draft.updatedAt >= savedAt
+  chapterContent.value = useDraft ? draft.content : (props.project.chapters?.[num] || '')
+  lastDraftContent = chapterContent.value
+  draftSavedAt.value = useDraft ? draft.updatedAt : ''
+  draftDirty.value = false
+  draftError.value = ''
+  restoringDraft = false
+  return true
+}
+function startTask() {
+  if (isWorking.value || !flushDraft()) return null
+  const task = {
+    projectId: props.project.id, chapterNumber: currentChapter.value, content: chapterContent.value,
+    project: JSON.parse(JSON.stringify(props.project)), controller: new AbortController()
+  }
+  activeTask.value = task
+  emit('update:isGenerating', true)
+  return task
+}
+function isCurrentTask(task) {
+  return activeTask.value === task && props.project?.id === task.projectId && !task.controller.signal.aborted
+}
+function finishTask(task) {
+  if (activeTask.value !== task) return
+  flushDraft()
+  activeTask.value = null
+  generationStep.value = ''
+  emit('update:isGenerating', false)
+}
+function cancelTask() {
+  const task = activeTask.value
+  if (!task) return
+  task.controller.abort()
+  finishTask(task)
+}
+function taskConfig(stage, task) {
+  return { ...settings.getStageConfig(stage), signal: task.controller.signal }
+}
+function confirmAction(options) {
+  return new Promise(resolve => dialog.warning({
+    ...options, onPositiveClick: () => resolve(true), onNegativeClick: () => resolve(false),
+    onClose: () => resolve(false), onMaskClick: () => resolve(false)
+  }))
+}
+function saveTaskContent(task, status, extra = {}) {
+  const project = novelStore.projects.find(p => p.id === task.projectId)
+  if (!project) throw new Error('项目已不存在')
+  novelStore.updateProject(task.projectId, {
+    chapters: { ...project.chapters, [task.chapterNumber]: task.content },
+    chapterMeta: { ...project.chapterMeta, [task.chapterNumber]: {
+      ...project.chapterMeta?.[task.chapterNumber], status, updatedAt: new Date().toISOString(),
+      wordCount: task.content.length, ...extra
+    } }
+  })
+}
+function handlePageHide() { flushDraft() }
+function handleBeforeUnload(event) {
+  if (!flushDraft()) { event.preventDefault(); event.returnValue = '' }
+}
+window.addEventListener('pagehide', handlePageHide)
+window.addEventListener('beforeunload', handleBeforeUnload)
+onBeforeRouteLeave(() => {
+  if (!flushDraft()) { message.error(draftError.value); return false }
+  cancelTask()
+})
+onBeforeUnmount(() => {
+  flushDraft()
+  cancelTask()
+  window.removeEventListener('pagehide', handlePageHide)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+watch(() => props.project?.id, id => {
+  if (id === loadedProjectId) return
+  flushDraft()
+  cancelTask()
+  if (id) restoreChapter(nextChapterToWrite.value)
+}, { flush: 'sync' })
 
 // Parsed blueprint chapters - 解析后的大纲章节
 const blueprintChapters = computed(() => {
@@ -60,7 +174,13 @@ const finalizedChaptersCount = computed(() => {
   return count
 })
 
-const currentChapterStatus = computed(() => getChapterStatus(currentChapter.value))
+const currentChapterStatus = computed(() => {
+  const status = getChapterStatus(currentChapter.value)
+  if (chapterContent.value !== (props.project?.chapters?.[currentChapter.value] || '')) {
+    return status === 'finalized' ? 'needs_refinalize' : 'draft'
+  }
+  return status
+})
 
 // Current chapter's relation graph data
 const currentChapterGraph = computed(() => {
@@ -69,8 +189,9 @@ const currentChapterGraph = computed(() => {
 
 // Load chapter content when switching - 切换章节时加载内容
 function loadChapter(num) {
-  currentChapter.value = num
-  chapterContent.value = props.project?.chapters?.[num] || ''
+  if (isWorking.value) return
+  if (!flushDraft()) { message.error(draftError.value); return }
+  restoreChapter(num)
 }
 
 function getChapterMeta(num) {
@@ -87,7 +208,8 @@ function getChapterStatus(num) {
 function getStatusLabel(status) {
   const labels = {
     finalized: '已定稿',
-    needs_refinalize: '需重新定稿',
+    needs_refinalize: '待定稿',
+    memory_failed: '记忆更新失败',
     draft: '草稿',
     empty: '未保存'
   }
@@ -98,6 +220,7 @@ function getStatusType(status) {
   const types = {
     finalized: 'success',
     needs_refinalize: 'warning',
+    memory_failed: 'error',
     draft: 'info',
     empty: 'default'
   }
@@ -154,264 +277,142 @@ function formatConsistencyReport(report) {
 
 async function confirmConsistencyReport(report) {
   if (!hasSignificantConsistencyIssues(report)) return true
-
-  return new Promise((resolve) => {
-    dialog.warning({
-      title: '定稿前一致性检查',
-      content: formatConsistencyReport(report),
-      positiveText: '仍然定稿',
-      negativeText: '返回修改',
-      onPositiveClick: () => resolve(true),
-      onNegativeClick: () => resolve(false)
-    })
-  })
+  return confirmAction({ title: '定稿前一致性检查', content: formatConsistencyReport(report), positiveText: '仍然定稿', negativeText: '返回修改' })
 }
 
 // Generate chapter draft - 生成章节草稿
 async function handleGenerate() {
-  if (!settings.apiConfig.apiKey) {
-    message.warning(t('messages.pleaseConfigureApiKey'))
-    return
-  }
-
-  if (!props.project?.blueprintGenerated) {
-    message.warning(t('chapterWriter.pleaseGenerateBlueprint'))
-    return
-  }
-
-  // Check if previous chapters exist and are finalized for non-first chapters
-  if (currentChapter.value > 1 && !props.project?.chapters?.[currentChapter.value - 1]) {
-    const confirmed = await new Promise((resolve) => {
-      dialog.warning({
-        title: t('common.tip'),
-        content: `第 ${currentChapter.value - 1} 章还未生成，建议先按顺序生成。是否继续？`,
-        positiveText: t('chapterWriter.continueGenerate'),
-        negativeText: t('common.cancel'),
-        onPositiveClick: () => resolve(true),
-        onNegativeClick: () => resolve(false)
-      })
-    })
-    if (!confirmed) return
-  } else if (currentChapter.value > 1 && getChapterStatus(currentChapter.value - 1) !== 'finalized') {
-    const previousStatus = getStatusLabel(getChapterStatus(currentChapter.value - 1))
-    const confirmed = await new Promise((resolve) => {
-      dialog.warning({
-        title: t('common.tip'),
-        content: `第 ${currentChapter.value - 1} 章当前状态为「${previousStatus}」，记忆可能尚未更新。继续生成可能造成上下文断层。是否继续？`,
-        positiveText: t('chapterWriter.continueGenerate'),
-        negativeText: t('common.cancel'),
-        onPositiveClick: () => resolve(true),
-        onNegativeClick: () => resolve(false)
-      })
-    })
-    if (!confirmed) return
-  }
-
-  const previousContent = chapterContent.value
+  if (!settings.apiConfig.apiKey) { message.warning(t('messages.pleaseConfigureApiKey')); return }
+  if (!props.project?.blueprintGenerated) { message.warning(t('chapterWriter.pleaseGenerateBlueprint')); return }
+  const task = startTask()
+  if (!task) return
   try {
-    emit('update:isGenerating', true)
-    chapterContent.value = ''
-    
-    const draft = await generateChapterDraft(
-      props.project,
-      currentChapter.value,
-      settings.getStageConfig('chapter'),
-      (step) => { generationStep.value = step },
-      (chunk, fullContent) => {
-        chapterContent.value = fullContent
-      }
-    )
-
-    chapterContent.value = draft
-    message.success(`第 ${currentChapter.value} 章草稿生成完成`)
-  } catch (error) {
-    console.error('Generation error:', error)
-    if (!chapterContent.value && previousContent) {
-      chapterContent.value = previousContent
+    if (task.chapterNumber > 1 && getChapterStatus(task.chapterNumber - 1) !== 'finalized') {
+      const confirmed = await confirmAction({
+        title: t('common.tip'), content: `第 ${task.chapterNumber - 1} 章尚未定稿，记忆可能未更新。是否继续生成？`,
+        positiveText: t('chapterWriter.continueGenerate'), negativeText: t('common.cancel')
+      })
+      if (!confirmed || !isCurrentTask(task)) return
     }
-    message.error(chapterContent.value
-      ? '生成中断，已保留当前已生成内容: ' + error.message
-      : '生成失败: ' + error.message)
-  } finally {
-    emit('update:isGenerating', false)
-    generationStep.value = ''
-  }
+    const draft = await generateChapterDraft(task.project, task.chapterNumber, taskConfig('chapter', task),
+      step => { if (isCurrentTask(task)) generationStep.value = step },
+      (chunk, fullContent) => { if (isCurrentTask(task)) chapterContent.value = fullContent })
+    if (!isCurrentTask(task)) return
+    chapterContent.value = draft
+    if (flushDraft()) message.success(`第 ${task.chapterNumber} 章草稿已生成并自动暂存`)
+  } catch (error) {
+    if (isCurrentTask(task)) message.error('生成未完成，已保留当前正文：' + error.message)
+  } finally { finishTask(task) }
 }
 
 // Save and finalize chapter - 保存并定稿章节
 async function handleSaveAndFinalize() {
-  if (!chapterContent.value.trim()) {
-    message.warning('章节内容为空')
-    return
-  }
-
-  if (!settings.apiConfig.apiKey) {
-    message.warning(t('messages.pleaseConfigureApiKey'))
-    return
-  }
-
+  if (!chapterContent.value.trim()) { message.warning('章节内容为空'); return }
+  if (!settings.apiConfig.apiKey) { message.warning(t('messages.pleaseConfigureApiKey')); return }
+  const task = startTask()
+  if (!task) return
+  let contentSaved = false
   try {
-    emit('update:isGenerating', true)
-
-    // Save chapter content - 保存章节内容
-    const updatedChapters = { ...props.project.chapters, [currentChapter.value]: chapterContent.value }
-
-    generationStep.value = '正在进行定稿前一致性检查...'
+    // Persist text first. Memory failures must never discard the chapter.
+    saveTaskContent(task, 'needs_refinalize', { memoryError: null })
+    contentSaved = true
+    generationStep.value = '正文已保存，正在进行定稿前一致性检查...'
     let consistencyReport = null
     try {
-      consistencyReport = await checkChapterConsistency(
-        props.project,
-        currentChapter.value,
-        chapterContent.value,
-        settings.getStageConfig('finalize')
-      )
-      const confirmed = await confirmConsistencyReport(consistencyReport)
-      if (!confirmed) return
-    } catch (checkError) {
-      console.error('Consistency check error:', checkError)
-      const confirmed = await new Promise((resolve) => {
-        dialog.warning({
-          title: '一致性检查失败',
-          content: `无法完成定稿前一致性检查：${checkError.message}。是否跳过检查继续定稿？`,
-          positiveText: '继续定稿',
-          negativeText: '取消',
-          onPositiveClick: () => resolve(true),
-          onNegativeClick: () => resolve(false)
-        })
+      consistencyReport = await checkChapterConsistency(task.project, task.chapterNumber, task.content, taskConfig('finalize', task))
+      if (!isCurrentTask(task)) return
+      if (!await confirmConsistencyReport(consistencyReport)) return
+    } catch (error) {
+      if (!isCurrentTask(task)) return
+      const confirmed = await confirmAction({
+        title: '一致性检查失败', content: `正文已保存。检查失败：${error.message}。是否跳过检查继续更新记忆？`,
+        positiveText: '继续定稿', negativeText: '稍后重试'
       })
       if (!confirmed) return
     }
-    
-    // Finalize chapter (update summary and character state)
-    const updates = await finalizeChapter(
-      props.project,
-      currentChapter.value,
-      chapterContent.value,
-      settings.getStageConfig('finalize'),
-      (step) => { generationStep.value = step }
-    )
-
-    novelStore.updateProject(props.project.id, {
-      chapters: updatedChapters,
-      chapterMeta: {
-        ...(props.project.chapterMeta || {}),
-        [currentChapter.value]: buildChapterMeta('finalized', {
-          finalizedAt: new Date().toISOString(),
-          memoryUpdatedAt: new Date().toISOString(),
-          consistencyCheck: consistencyReport
-        })
-      },
-      ...updates
+    if (!isCurrentTask(task)) return
+    const updates = await finalizeChapter(task.project, task.chapterNumber, task.content, taskConfig('finalize', task),
+      step => { if (isCurrentTask(task)) generationStep.value = step })
+    if (!isCurrentTask(task)) return
+    const latest = novelStore.projects.find(p => p.id === task.projectId)
+    if (!latest || latest.chapters?.[task.chapterNumber] !== task.content) throw new Error('正文已发生变化，请重新定稿')
+    const now = new Date().toISOString()
+    novelStore.updateProject(task.projectId, {
+      ...updates,
+      chapterMeta: { ...latest.chapterMeta, [task.chapterNumber]: {
+        ...latest.chapterMeta?.[task.chapterNumber], status: 'finalized', updatedAt: now,
+        finalizedAt: now, memoryUpdatedAt: now, memoryError: null, consistencyCheck: consistencyReport
+      } }
     })
-
-    message.success(`第 ${currentChapter.value} 章已保存并定稿`)
-
-    // Generate chapter relation graph in background
-    const savedChapter = currentChapter.value
-    const savedContent = chapterContent.value
-    generateChapterGraphData(savedChapter, savedContent)
-
-    // Auto advance to next chapter - 自动跳转到下一章
-    if (currentChapter.value < props.project.numberOfChapters) {
-      currentChapter.value++
-      chapterContent.value = ''
-    }
+    flushDraft()
+    try { removeChapterDraft(localStorage, task.projectId, task.chapterNumber) } catch { /* Saved chapter remains authoritative. */ }
+    message.success(`第 ${task.chapterNumber} 章已保存并定稿`)
+    generateChapterGraphData(task.chapterNumber, task.content, task.projectId)
+    if (task.chapterNumber < task.project.numberOfChapters) restoreChapter(task.chapterNumber + 1)
   } catch (error) {
-    console.error('Finalize error:', error)
-    message.error('保存失败: ' + error.message)
-  } finally {
-    emit('update:isGenerating', false)
-    generationStep.value = ''
-  }
+    if (!isCurrentTask(task)) return
+    if (contentSaved) {
+      const latest = novelStore.projects.find(p => p.id === task.projectId)
+      if (latest?.chapters?.[task.chapterNumber] === task.content) {
+        try { saveTaskContent(task, 'memory_failed', { memoryError: error.message }) } catch { /* Draft still provides recovery. */ }
+      }
+    }
+    message.error((contentSaved ? '正文已保存，定稿未完成，可重试：' : '保存失败，草稿仍保留：') + error.message)
+  } finally { finishTask(task) }
 }
 
 // Quick save without finalize - 快速保存（不定稿）
 function handleQuickSave() {
-  if (!chapterContent.value.trim()) {
-    message.warning('章节内容为空')
-    return
-  }
-
-  const updatedChapters = { ...props.project.chapters, [currentChapter.value]: chapterContent.value }
+  if (isWorking.value) return
+  if (!chapterContent.value.trim()) { message.warning('章节内容为空'); return }
+  if (!flushDraft()) { message.error(draftError.value); return }
   const previousStatus = getChapterStatus(currentChapter.value)
-  const previousContent = props.project?.chapters?.[currentChapter.value] || ''
-  const status = previousStatus === 'finalized' && previousContent !== chapterContent.value
-    ? 'needs_refinalize'
-    : previousStatus === 'finalized'
-      ? 'finalized'
-      : 'draft'
-
-  novelStore.updateProject(props.project.id, {
-    chapters: updatedChapters,
-    chapterMeta: {
-      ...(props.project.chapterMeta || {}),
-      [currentChapter.value]: buildChapterMeta(status)
-    }
-  })
-  message.success(status === 'needs_refinalize' ? '已保存，需重新定稿以更新记忆' : '已保存')
+  const unchanged = props.project.chapters?.[currentChapter.value] === chapterContent.value
+  const status = unchanged ? previousStatus : (previousStatus === 'finalized' || previousStatus === 'needs_refinalize' ? 'needs_refinalize' : 'draft')
+  try {
+    saveTaskContent({ projectId: props.project.id, chapterNumber: currentChapter.value, content: chapterContent.value }, status)
+    message.success(status === 'finalized' ? '已保存' : '正文已保存，可继续定稿更新记忆')
+  } catch (error) { message.error('保存失败，草稿仍保留：' + error.message) }
 }
 
 // Enrich chapter - 扩写章节
 async function handleEnrich() {
-  if (!chapterContent.value.trim()) {
-    message.warning('请先生成或输入章节内容')
-    return
-  }
-
-  if (!settings.apiConfig.apiKey) {
-    message.warning(t('messages.pleaseConfigureApiKey'))
-    return
-  }
-
-  const originalContent = chapterContent.value
-  let streamedContent = ''
-
+  if (!chapterContent.value.trim()) { message.warning('请先生成或输入章节内容'); return }
+  if (!settings.apiConfig.apiKey) { message.warning(t('messages.pleaseConfigureApiKey')); return }
+  const task = startTask()
+  if (!task) return
   try {
-    emit('update:isGenerating', true)
-    
-    const enriched = await enrichChapter(
-      originalContent,
-      props.project.wordNumber,
-      settings.getStageConfig('enrich'),
-      (step) => { generationStep.value = step },
-      (chunk, fullContent) => {
-        streamedContent = fullContent
-        chapterContent.value = fullContent
-      }
-    )
-
+    const enriched = await enrichChapter(task.content, task.project.wordNumber, taskConfig('enrich', task),
+      step => { if (isCurrentTask(task)) generationStep.value = step },
+      (chunk, fullContent) => { if (isCurrentTask(task)) chapterContent.value = fullContent })
+    if (!isCurrentTask(task)) return
     chapterContent.value = enriched
-    message.success('扩写完成')
+    if (flushDraft()) message.success('扩写完成，草稿已自动暂存')
   } catch (error) {
-    console.error('Enrich error:', error)
-    if (!chapterContent.value && originalContent) {
-      chapterContent.value = originalContent
-    }
-    message.error(streamedContent
-      ? '扩写中断，已保留当前已生成内容: ' + error.message
-      : '扩写失败: ' + error.message)
-  } finally {
-    emit('update:isGenerating', false)
-    generationStep.value = ''
-  }
+    if (isCurrentTask(task)) message.error('扩写未完成，已保留当前正文：' + error.message)
+  } finally { finishTask(task) }
 }
 
 // Generate chapter relation graph - 生成章节关系图谱
-async function generateChapterGraphData(chapterNum, chapterText) {
+async function generateChapterGraphData(chapterNum, chapterText, projectId) {
+  const graphProject = novelStore.projects.find(p => p.id === projectId)
+  if (!graphProject) return
   try {
     graphGenerating.value = true
     graphStep.value = '正在提取本章人物关系...'
 
     const graphResult = await generateChapterGraph(
-      props.project,
+      graphProject,
       chapterNum,
       chapterText,
       settings.getStageConfig('architecture'),
       (step) => { graphStep.value = step }
     )
 
-    const updatedChapterGraphs = { ...props.project.chapterGraphs, [chapterNum]: graphResult }
-    novelStore.updateProject(props.project.id, { chapterGraphs: updatedChapterGraphs })
+    const latest = novelStore.projects.find(p => p.id === projectId)
+    if (!latest || latest.chapters?.[chapterNum] !== chapterText) return
+    const updatedChapterGraphs = { ...latest.chapterGraphs, [chapterNum]: graphResult }
+    novelStore.updateProject(projectId, { chapterGraphs: updatedChapterGraphs })
     message.success(`第 ${chapterNum} 章关系图谱已生成`)
   } catch (err) {
     console.error('Chapter graph error:', err)
@@ -423,7 +424,7 @@ async function generateChapterGraphData(chapterNum, chapterText) {
 }
 
 // Initialize with next chapter to write - 初始化到下一个要写的章节
-loadChapter(nextChapterToWrite.value)
+restoreChapter(nextChapterToWrite.value)
 </script>
 
 <template>
@@ -479,6 +480,7 @@ loadChapter(nextChapterToWrite.value)
                 class="px-4 py-3 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 :class="{ 'bg-indigo-50 dark:bg-indigo-900/20 border-l-2 !border-l-indigo-500': ch.number === currentChapter }"
                 @click="loadChapter(ch.number)"
+                :aria-disabled="isWorking"
               >
                 <div class="flex items-center justify-between">
                   <span class="text-sm font-medium text-gray-800 dark:text-white truncate flex-1">
@@ -545,29 +547,36 @@ loadChapter(nextChapterToWrite.value)
           </div>
 
           <!-- Generation status - 生成状态 -->
-          <div v-if="isGenerating" class="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl p-4 border border-indigo-200/50 dark:border-indigo-700/50">
+          <div v-if="isWorking" class="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl p-4 border border-indigo-200/50 dark:border-indigo-700/50">
             <div class="flex items-center gap-3">
               <ReloadOutline class="w-5 h-5 text-indigo-500 animate-spin" />
               <span class="text-indigo-700 dark:text-indigo-300 font-medium">{{ generationStep || '处理中...' }}</span>
             </div>
           </div>
 
+          <n-button v-if="activeTask" @click="cancelTask" secondary>停止生成并保留草稿</n-button>
+          <p role="status" class="text-sm" :class="draftError ? 'text-red-500' : 'text-gray-500'">
+            {{ draftError || (draftDirty ? '正在自动暂存草稿…' : draftSavedAt ? '草稿已自动暂存到本浏览器' : '编辑后将自动暂存草稿') }}
+          </p>
+          <p v-if="currentChapterStatus === 'memory_failed'" class="text-sm text-amber-600">
+            正文已保存，记忆更新尚未完成。点击“重试定稿”后再继续下一章。
+          </p>
           <!-- Action buttons - 操作按钮 -->
           <div class="flex items-center gap-2 flex-wrap">
-            <n-button type="primary" :loading="isGenerating" @click="handleGenerate">
+            <n-button type="primary" :loading="isWorking" @click="handleGenerate">
               <template #icon>
                 <n-icon><SparklesOutline /></n-icon>
               </template>
               生成草稿
             </n-button>
-            <n-button :disabled="isGenerating || !chapterContent" @click="handleEnrich" secondary>
+            <n-button :disabled="isWorking || !chapterContent" @click="handleEnrich" secondary>
               <template #icon>
                 <n-icon><PencilOutline /></n-icon>
               </template>
               扩写
             </n-button>
             <div class="flex-1"></div>
-            <n-button :disabled="isGenerating || !chapterContent" @click="handleQuickSave" tertiary>
+            <n-button :disabled="isWorking || !chapterContent" @click="handleQuickSave" tertiary>
               <template #icon>
                 <n-icon><SaveOutline /></n-icon>
               </template>
@@ -581,11 +590,11 @@ loadChapter(nextChapterToWrite.value)
               </template>
               仅保存章节内容，不更新摘要和角色状态
             </n-tooltip>
-            <n-button type="success" :loading="isGenerating" :disabled="!chapterContent" @click="handleSaveAndFinalize">
+            <n-button type="success" :loading="isWorking" :disabled="isWorking || !chapterContent" @click="handleSaveAndFinalize">
               <template #icon>
                 <n-icon><CheckmarkOutline /></n-icon>
               </template>
-              保存并定稿
+              {{ currentChapterStatus === 'memory_failed' ? '重试定稿' : '保存并定稿' }}
             </n-button>
             <n-tooltip trigger="hover">
               <template #trigger>
@@ -600,6 +609,7 @@ loadChapter(nextChapterToWrite.value)
           <!-- Editor textarea - 编辑器文本框 -->
           <n-input
             v-model:value="chapterContent"
+            :readonly="isWorking"
             type="textarea"
             :autosize="{ minRows: 20, maxRows: 40 }"
             :placeholder="`在此编写或生成第 ${currentChapter} 章内容...`"

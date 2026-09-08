@@ -1,166 +1,105 @@
-import axios from 'axios'
+import { validateApiConfig } from '../utils/api-config.js'
 
-// LLM API service - LLM API 服务
-// Handles all AI model interactions - 处理所有 AI 模型交互
-
-/**
- * Build request config for different LLM providers
- * 为不同 LLM 提供商构建请求配置
- */
-function buildRequestConfig(config, prompt, stream = false) {
-  const { channel, baseUrl, apiKey, model, temperature, maxTokens, timeout } = config
-  
-  // Azure OpenAI 特殊处理
+export class LLMError extends Error {
+  constructor(message, code) { super(message); this.name = 'LLMError'; this.code = code }
+}
+function buildRequest(config, prompt, stream) {
+  const { channel, baseUrl, apiKey, model, temperature, maxTokens } = config
+  const data = { model, messages: [{ role: 'user', content: prompt }], temperature, max_tokens: maxTokens, stream }
   if (channel === 'azure') {
-    const { resourceName, deploymentId, apiVersion } = config
-    const azureUrl = `https://${resourceName}.openai.azure.com/openai/deployments/${deploymentId}/chat/completions?api-version=${apiVersion}`
-    
-    return {
-      url: azureUrl,
-      headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json'
-      },
-      data: {
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-        stream
-      }
-    }
+    delete data.model
+    return { url: `https://${config.resourceName}.openai.azure.com/openai/deployments/${config.deploymentId}/chat/completions?api-version=${encodeURIComponent(config.apiVersion)}`,
+      headers: { 'api-key': apiKey, 'Content-Type': 'application/json' }, data }
   }
-  
-  // Anthropic Claude 特殊处理
   if (channel === 'anthropic') {
-    return {
-      url: `${baseUrl}/messages`,
-      headers: {
-        'x-api-key': apiKey,
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01'
-      },
-      data: {
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens,
-        stream
-      }
+    return { url: `${baseUrl}/messages`, headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' }, data }
+  }
+  return { url: `${baseUrl}/chat/completions`, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, data }
+}
+function checkFinishReason(reason) {
+  if (!reason) return
+  if (reason === 'length' || reason === 'max_tokens') {
+    throw new LLMError('生成达到输出上限，内容尚未完成。已保留收到的正文，请提高上限后重试。', 'OUTPUT_TRUNCATED')
+  }
+  if (!['stop', 'end_turn', 'stop_sequence'].includes(reason)) throw new LLMError(`模型未正常完成文本生成（${reason}）`, 'UNEXPECTED_FINISH')
+}
+function checkApiError(data) {
+  if (data?.error || data?.type === 'error') throw new LLMError(String(data.error?.message || data.message || 'AI 接口返回错误').slice(0, 500), 'API_ERROR')
+}
+async function readStream(response, channel, onStream) {
+  if (!response.body) throw new LLMError('接口没有返回响应流', 'INVALID_RESPONSE')
+  const reader = response.body.getReader(), decoder = new TextDecoder()
+  let buffer = '', fullContent = '', completed = false
+  function event(raw) {
+    const data = raw.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n')
+    if (!data) return
+    if (data.trim() === '[DONE]') { completed = true; return }
+    let parsed
+    try { parsed = JSON.parse(data) } catch { throw new LLMError('接口返回的流式消息格式不完整', 'INVALID_STREAM') }
+    checkApiError(parsed)
+    const choice = parsed.choices?.[0]
+    const content = channel === 'anthropic' ? (parsed.type === 'content_block_delta' ? parsed.delta?.text : '') : choice?.delta?.content
+    if (typeof content === 'string' && content) { fullContent += content; onStream(content, fullContent) }
+    const reason = channel === 'anthropic' ? (parsed.type === 'message_delta' ? parsed.delta?.stop_reason : null) : choice?.finish_reason
+    checkFinishReason(reason)
+    if (reason || (channel === 'anthropic' && parsed.type === 'message_stop')) completed = true
+  }
+  function drain() {
+    let boundary
+    while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+      const raw = buffer.slice(0, boundary.index)
+      buffer = buffer.slice(boundary.index + boundary[0].length)
+      event(raw)
     }
   }
-  
-  // 标准 OpenAI 兼容格式（Gemini/Kimi/DeepSeek/百川/智谱等）
-  return {
-    url: `${baseUrl}/chat/completions`,
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    data: {
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature,
-      max_tokens: maxTokens,
-      stream
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      drain()
+      if (completed) break
     }
+    buffer += decoder.decode()
+    drain()
+    if (buffer.trim()) event(buffer)
+    if (!completed) throw new LLMError('连接提前结束，正文尚未生成完整，已保留收到的内容。', 'INCOMPLETE_STREAM')
+    if (!fullContent.trim()) throw new LLMError('模型没有返回正文，请检查模型或输出上限。', 'EMPTY_RESPONSE')
+    return fullContent
+  } finally {
+    try { await reader.cancel() } catch { /* Connection may already be closed. */ }
+    reader.releaseLock()
   }
 }
-
-/**
- * Create chat completion request
- * 创建聊天补全请求
- */
-export async function chatCompletion(config, prompt, onStream = null) {
-  const { timeout, channel } = config
-  const requestConfig = buildRequestConfig(config, prompt, !!onStream)
-
-  if (onStream) {
-    // Streaming response - 流式响应
-    return streamCompletion(channel, requestConfig, timeout, onStream)
-  }
-
-  // Non-streaming response - 非流式响应
-  const response = await axios.post(
-    requestConfig.url,
-    requestConfig.data,
-    {
-      headers: requestConfig.headers,
-      timeout: timeout * 1000
+export async function chatCompletion(value, prompt, onStream = null) {
+  const config = validateApiConfig(value), request = buildRequest(config, prompt, Boolean(onStream))
+  const controller = new AbortController()
+  const abort = () => controller.abort(value.signal?.reason)
+  if (value.signal?.aborted) abort()
+  else value.signal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => controller.abort(new DOMException('请求超时', 'TimeoutError')), config.timeout * 1000)
+  try {
+    const response = await fetch(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(request.data), signal: controller.signal })
+    if (!response.ok) {
+      let detail = ''
+      try { const body = await response.json(); detail = body.error?.message || body.message || '' } catch { /* Non-JSON error page. */ }
+      throw new LLMError(`AI 请求失败（HTTP ${response.status}）${detail ? ': ' + String(detail).slice(0, 300) : ''}`, 'HTTP_ERROR')
     }
-  )
-
-  // 不同平台的响应格式处理
-  if (channel === 'anthropic') {
-    return response.data.content[0].text
+    if (onStream) return await readStream(response, config.channel, onStream)
+    let data
+    try { data = await response.json() } catch { throw new LLMError('接口返回了无效 JSON', 'INVALID_RESPONSE') }
+    checkApiError(data)
+    const content = config.channel === 'anthropic'
+      ? data.content?.filter(block => block.type === 'text').map(block => block.text).join('')
+      : data.choices?.[0]?.message?.content
+    checkFinishReason(config.channel === 'anthropic' ? data.stop_reason : data.choices?.[0]?.finish_reason)
+    if (typeof content !== 'string' || !content.trim()) throw new LLMError('模型没有返回正文，请检查模型或输出上限。', 'EMPTY_RESPONSE')
+    return content
+  } finally {
+    clearTimeout(timer)
+    value.signal?.removeEventListener('abort', abort)
   }
-  
-  return response.data.choices[0].message.content
 }
-
-/**
- * Stream completion with callback
- * 流式补全并回调
- */
-async function streamCompletion(channel, requestConfig, timeout, onStream) {
-  const response = await fetch(requestConfig.url, {
-    method: 'POST',
-    headers: requestConfig.headers,
-    body: JSON.stringify(requestConfig.data),
-    signal: AbortSignal.timeout(timeout * 1000)
-  })
-
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`)
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let fullContent = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    const chunk = decoder.decode(value)
-    const lines = chunk.split('\n').filter(line => line.trim() !== '')
-
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6)
-        if (data === '[DONE]') continue
-        
-        try {
-          const parsed = JSON.parse(data)
-          
-          // 不同平台的流式响应格式处理
-          let content = ''
-          if (channel === 'anthropic') {
-            // Anthropic SSE 格式
-            if (parsed.type === 'content_block_delta') {
-              content = parsed.delta?.text || ''
-            }
-          } else {
-            // OpenAI 兼容格式
-            content = parsed.choices?.[0]?.delta?.content || ''
-          }
-          
-          if (content) {
-            fullContent += content
-            onStream(content, fullContent)
-          }
-        } catch (e) {
-          // Skip invalid JSON
-        }
-      }
-    }
-  }
-
-  return fullContent
-}
-
-/**
- * Clean AI response - remove markdown formatting
- * 清理 AI 响应 - 移除 markdown 格式
- */
 export function cleanResponse(text) {
   if (!text) return ''
   

@@ -58,16 +58,16 @@ function getProgressText(key, params = {}) {
   return text
 }
 
-import { chatCompletion, cleanResponse } from './llm'
-import { architecturePrompts } from '../prompts'
+import { chatCompletion, cleanResponse } from './llm.js'
+import { architecturePrompts } from '../prompts/architecture.js'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
-import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized'
+import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized.js'
 import {
   estimateTokens,
   generateChapterSummary, extractChapterFacts, checkChapterConsistency as checkChapterConsistencyPrompt, generateArcSummary,
   updateCharacterDB, updateForeshadowingDB, updateWorldBuildingDB,
   assembleChapterContext, compressGlobalSummary, migrateOldSummary
-} from '../prompts/utility-v3'
+} from '../prompts/utility-v3.js'
 
 // 解构提示词
 const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, worldBuilding: worldBuildingPrompt, plotArchitecture: plotArchitecturePrompt, characterState: createCharacterStatePrompt } = architecturePrompts
@@ -1358,6 +1358,24 @@ export async function checkChapterConsistency(project, chapterNumber, chapterTex
  * 更新：章节摘要（JSON）、角色数据库、伏笔数据库、世界观数据库
  */
 export async function finalizeChapter(project, chapterNumber, chapterText, apiConfig, onProgress) {
+  // Work on a detached snapshot; a failed merge must not mutate stored memory.
+  project = JSON.parse(JSON.stringify(project))
+  const throwIfCancelled = () => apiConfig.signal?.throwIfAborted()
+  throwIfCancelled()
+  const requireSummary = (value) => {
+    const summary = normalizeChapterSummary(value, chapterNumber)
+    if (!summary || summary.chapter !== chapterNumber || typeof summary.summary !== 'string' || !summary.summary.trim()) {
+      throw new Error('章节摘要缺失或章节号不匹配')
+    }
+    return summary
+  }
+  const requireDatabase = (response, fields) => {
+    const db = parseJsonResponse(response)
+    if (!db || typeof db !== 'object' || fields.some(field => !Array.isArray(db[field]))) {
+      throw new Error('记忆数据库格式无效：' + fields.join(', '))
+    }
+    return db
+  }
   const results = {
     globalSummary: project.globalSummary,
     characterState: project.characterState,
@@ -1408,9 +1426,12 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
       }
       results.memoryMigrated = true
     } catch (e) {
+      throwIfCancelled()
       console.error('旧摘要迁移失败，继续使用现有摘要:', e)
     }
   }
+
+  const memoryCheckpoint = JSON.stringify(results)
 
   // 1. 单次提取本章事实包，并在本地合并到各类记忆库。
   onProgress('正在提取章节事实...', 2, 6)
@@ -1431,9 +1452,9 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
       currentWorldDB: results.worldBuildingDB || '{"entries": []}'
     }))
     const chapterFacts = parseJsonResponse(factsResponse)
-    if (!chapterFacts) throw new Error('章节事实 JSON 解析失败')
+    if (!chapterFacts || ['characters', 'relationships', 'factions', 'foreshadowing', 'worldBuilding'].some(key => !Array.isArray(chapterFacts[key]))) throw new Error('章节事实 JSON 字段不完整')
 
-    const summaryJson = normalizeChapterSummary(chapterFacts.chapterSummary, chapterNumber)
+    const summaryJson = requireSummary(chapterFacts.chapterSummary)
     if (summaryJson) {
       results.chapterSummaries = upsertChapterSummary(results.chapterSummaries, summaryJson)
     }
@@ -1449,6 +1470,8 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
     const worldBuildingDB = mergeWorldBuildingDB(results.worldBuildingDB, chapterFacts, chapterNumber)
     results.worldBuildingDB = JSON.stringify(worldBuildingDB, null, 2)
   } catch (e) {
+    throwIfCancelled()
+    Object.assign(results, JSON.parse(memoryCheckpoint))
     console.error('章节事实提取失败，降级到旧版多步更新:', e)
     try {
       const previousChapterSummary = results.chapterSummaries.length > 0
@@ -1461,7 +1484,7 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
         arcSummary: results.currentArcSummary || '',
         chapterOutline: getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
       })))
-      const summaryJson = normalizeChapterSummary(parseJsonResponse(summaryResponse), chapterNumber)
+      const summaryJson = requireSummary(parseJsonResponse(summaryResponse))
       if (summaryJson) {
         results.chapterSummaries = upsertChapterSummary(results.chapterSummaries, summaryJson)
       }
@@ -1471,7 +1494,7 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
         currentCharacterDB: results.characterDB || '{"characters": [], "relationships": []}',
         chapterNumber
       })))
-      results.characterDB = JSON.stringify(parseJsonResponse(charDBResponse, parseJsonDb(results.characterDB, { characters: [], relationships: [] })), null, 2)
+      results.characterDB = JSON.stringify(requireDatabase(charDBResponse, ['characters', 'relationships']), null, 2)
       results.characterState = buildCharacterStateFromDB(results.characterDB, project.characterState)
 
       const foreshadowingResponse = cleanResponse(await chatCompletion(apiConfig, updateForeshadowingDB({
@@ -1479,16 +1502,17 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
         currentForeshadowingDB: results.foreshadowingDB || '{"foreshadowing": []}',
         chapterNumber
       })))
-      results.foreshadowingDB = JSON.stringify(parseJsonResponse(foreshadowingResponse, parseJsonDb(results.foreshadowingDB, { foreshadowing: [] })), null, 2)
+      results.foreshadowingDB = JSON.stringify(requireDatabase(foreshadowingResponse, ['foreshadowing']), null, 2)
 
       const worldResponse = cleanResponse(await chatCompletion(apiConfig, updateWorldBuildingDB({
         chapterText,
         currentWorldDB: results.worldBuildingDB || '{"entries": []}',
         chapterNumber
       })))
-      results.worldBuildingDB = JSON.stringify(parseJsonResponse(worldResponse, parseJsonDb(results.worldBuildingDB, { entries: [] })), null, 2)
+      results.worldBuildingDB = JSON.stringify(requireDatabase(worldResponse, ['entries']), null, 2)
     } catch (e2) {
-      console.error('旧版多步记忆更新也失败:', e2)
+      throwIfCancelled()
+      throw new Error('章节记忆更新失败，正文已保留，可重试定稿：' + e2.message)
     }
   }
 
@@ -1534,7 +1558,8 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
       }
     }
   } catch (e) {
-    console.error('弧摘要更新失败:', e)
+    throwIfCancelled()
+    throw new Error('弧摘要更新失败，正文已保留，可重试定稿：' + e.message)
   }
 
   // 3. 更新兼容旧版的 globalSummary，但只保留跨弧摘要 + 当前弧 + 最近章节，避免无限累积。
@@ -1560,9 +1585,11 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
       })))
     }
   } catch (e) {
-    console.error('摘要压缩失败:', e)
+    throwIfCancelled()
+    throw new Error('摘要压缩失败，正文已保留，可重试定稿：' + e.message)
   }
 
+  throwIfCancelled()
   onProgress('章节定稿完成', 6, 6)
 
   return results

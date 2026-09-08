@@ -1,14 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
+import { normalizeApiConfig } from '../utils/api-config.js'
 
-// Default model config - 默认模型配置
-const DEFAULT_CHANNEL = 'deepseek'
-const DEFAULT_BASE_URL = 'https://api.deepseek.com'
-const DEFAULT_MODEL = 'deepseek-v4-flash'
-const DEFAULT_MAX_TOKENS = 32768
-
-// Default locale - 默认语言
-const DEFAULT_LOCALE = localStorage.getItem('locale') || 'zh-CN'
+function readSetting(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback }
+}
 
 // Settings store - 设置状态管理
 export const useSettingsStore = defineStore('settings', () => {
@@ -18,28 +14,16 @@ export const useSettingsStore = defineStore('settings', () => {
   
   const locale = ref(localStorage.getItem('locale') || 'zh-CN')
   
-  const apiConfig = ref(JSON.parse(localStorage.getItem('api_config') || JSON.stringify({
-    channel: DEFAULT_CHANNEL,
-    baseUrl: DEFAULT_BASE_URL,
-    apiKey: '',
-    model: DEFAULT_MODEL,
-    temperature: 0.7,
-    maxTokens: DEFAULT_MAX_TOKENS,
-    timeout: 600,
-    // Azure 配置
-    resourceName: '',
-    deploymentId: '',
-    apiVersion: '2024-02-15-preview'
-  })))
+  const apiConfig = ref(normalizeApiConfig(readSetting('api_config', {})))
 
   // Stage-specific model configs - 各环节模型配置
-  const stageModels = ref(JSON.parse(localStorage.getItem('stage_models') || JSON.stringify({
+  const stageModels = ref({ ...{
     architecture: '',  // 架构生成
     blueprint: '',     // 大纲生成
     chapter: '',       // 章节生成
     finalize: '',      // 定稿（摘要/状态更新）
     enrich: ''         // 扩写
-  })))
+  }, ...readSetting('stage_models', {}) })
 
   // Get config for specific stage - 获取特定环节的配置
   function getStageConfig(stage) {
@@ -87,8 +71,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // Update API config - 更新 API 配置
   function updateApiConfig(config) {
-    apiConfig.value = { ...apiConfig.value, ...config }
-    localStorage.setItem('api_config', JSON.stringify(apiConfig.value))
+    const next = normalizeApiConfig({ ...apiConfig.value, ...config })
+    localStorage.setItem('api_config', JSON.stringify(next))
+    apiConfig.value = next
   }
 
   // Update Azure config - 更新 Azure 配置
