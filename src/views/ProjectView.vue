@@ -1,13 +1,14 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { useSeo } from '../composables/useSeo'
-import { generateArchitecture, generateChapterBlueprint, parseChapterBlueprint, formatChapterBlueprintMarkdown, getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
+import { getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
 import { useMessage, useDialog, NButton, NTabs, NTabPane, NCard, NProgress, NTag, NIcon } from 'naive-ui'
 import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline, CompassOutline } from '@vicons/ionicons5'
+import { runGenerationPipeline, generationRunLabel, generationInputRevision } from '../utils/generation-pipeline.js'
 import ArchitecturePanel from '../components/ArchitecturePanel.vue'
 import ChapterBlueprintPanel from '../components/ChapterBlueprintPanel.vue'
 import ChapterWriterPanel from '../components/ChapterWriterPanel.vue'
@@ -86,81 +87,63 @@ onMounted(() => {
   }
 })
 
-// Generate architecture
-async function handleGenerateArchitecture() {
-  if (!isApiConfigured.value) {
-    message.warning(t('messages.pleaseConfigureApiKey'))
-    return
-  }
+const pipelineTask = shallowRef(null)
+const savedRuns = computed(() => Object.entries(project.value?.generationRuns || {}).filter(([kind]) => ['architecture', 'blueprint'].includes(kind)))
 
+function cancelPipeline() {
+  const task = pipelineTask.value
+  if (!task) return
+  task.controller.abort()
+  pipelineTask.value = null
+  isGenerating.value = false
+  generationStep.value = ''
+}
+onBeforeRouteLeave(cancelPipeline)
+onBeforeRouteUpdate(cancelPipeline)
+onBeforeUnmount(cancelPipeline)
+
+async function runPipeline(kind, restart = false) {
+  if (isGenerating.value || !project.value) return
+  if (!isApiConfigured.value) { message.warning(t('messages.pleaseConfigureApiKey')); return }
+  if (kind === 'blueprint' && !project.value.architectureGenerated) { message.warning(t('project.pleaseGenerateArchitectureFirst')); return }
+  const snapshot = JSON.parse(JSON.stringify(project.value))
+  const task = { projectId: snapshot.id, controller: new AbortController() }
+  pipelineTask.value = task
+  isGenerating.value = true
+  generationProgress.value = { current: 0, total: 0 }
   try {
-    isGenerating.value = true
-    
-    const results = await generateArchitecture(
-      project.value,
-      settings.getStageConfig('architecture'),
-      (step, current, total) => {
-        generationStep.value = t(`generation.steps.${step}`) || step
+    await runGenerationPipeline(snapshot, kind, {
+      restart, config: { ...settings.getStageConfig(kind), signal: task.controller.signal },
+      getLatest: id => novelStore.projects.find(p => p.id === id),
+      save: (id, updates) => novelStore.updateProject(id, updates),
+      onProgress: (step, current, total) => {
+        if (pipelineTask.value !== task) return
+        generationStep.value = step
         generationProgress.value = { current, total }
       }
-    )
-
-    novelStore.updateProject(project.value.id, {
-      ...results,
-      architectureGenerated: true
     })
-
-    message.success(t('project.architectureGeneratedSuccess'))
+    if (pipelineTask.value === task) message.success(kind === 'architecture' ? '架构已生成并保存' : '章节大纲已生成并保存')
   } catch (error) {
-    console.error('Generation error:', error)
-    message.error(t('project.generationFailed', { error: error.message }))
+    if (pipelineTask.value === task && !task.controller.signal.aborted) message.error('生成未完成，已保存的步骤可继续：' + error.message)
   } finally {
-    isGenerating.value = false
-    generationStep.value = ''
+    if (pipelineTask.value === task) {
+      pipelineTask.value = null
+      isGenerating.value = false
+      generationStep.value = ''
+    }
   }
 }
-
-// Generate chapter blueprint
-async function handleGenerateBlueprint() {
-  if (!isApiConfigured.value) {
-    message.warning(t('messages.pleaseConfigureApiKey'))
+const handleGenerateArchitecture = () => runPipeline('architecture')
+const handleGenerateBlueprint = () => runPipeline('blueprint')
+function handleConfirmBlueprint() {
+  if (isGenerating.value || !project.value?.architectureGenerated || !chapters.value.length) return
+  const total = Number(project.value.numberOfChapters)
+  if (!Number.isInteger(total) || total < 1 || !Array.from({ length: total }, (_, i) => i + 1).every(n => chapters.value.some(ch => ch.number === n && ch.title?.trim() && ch.summary?.trim()))) {
+    message.warning('当前大纲缺少章节、标题或简述，请先补充生成')
     return
   }
-
-  if (!project.value.architectureGenerated) {
-    message.warning(t('project.pleaseGenerateArchitectureFirst'))
-    return
-  }
-
-  try {
-    isGenerating.value = true
-    
-    const blueprintResult = await generateChapterBlueprint(
-      project.value,
-      settings.getStageConfig('blueprint'),
-      (step, current, total) => {
-        generationStep.value = t(`generation.steps.${step}`) || step
-        generationProgress.value = { current, total }
-      }
-    )
-
-    const chapterBlueprintData = blueprintResult.chapterBlueprintData || parseChapterBlueprint(blueprintResult.chapterBlueprint || blueprintResult)
-    const chapterBlueprint = blueprintResult.chapterBlueprint || formatChapterBlueprintMarkdown(chapterBlueprintData)
-
-    novelStore.updateProject(project.value.id, {
-      chapterBlueprint,
-      chapterBlueprintData,
-      blueprintGenerated: true
-    })
-
-    message.success(t('project.blueprintGeneratedSuccess'))
-  } catch (error) {
-    console.error('Generation error:', error)
-    message.error(t('project.generationFailed', { error: error.message }))
-  } finally {
-    isGenerating.value = false
-    generationStep.value = ''
-  }
+  novelStore.updateProject(project.value.id, { blueprintGenerated: true })
+  message.success('已确认沿用当前大纲')
 }
 
 // Written chapters count
@@ -192,30 +175,11 @@ async function confirmRegenerate(type) {
   dialog.warning({
     title: t('project.regenerateConfirm'),
     content: type === 'architecture' 
-      ? t('project.regenerateArchitectureConfirm')
-      : t('project.regenerateBlueprintConfirm'),
+      ? '重新生成架构，新版本完成后替换原架构。已有正文保留，章节记忆需要重新更新，大纲需要确认或重新生成。'
+      : '重新生成大纲，新版本完成后替换原大纲。失败或停止时保留原版本和已保存的生成进度。',
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
-    onPositiveClick: () => {
-      if (type === 'architecture') {
-        novelStore.updateProject(project.value.id, {
-          coreSeed: '',
-          characterDynamics: '',
-          worldBuilding: '',
-          plotArchitecture: '',
-          characterState: '',
-          architectureGenerated: false
-        })
-        handleGenerateArchitecture()
-      } else {
-        novelStore.updateProject(project.value.id, {
-          chapterBlueprint: '',
-          chapterBlueprintData: [],
-          blueprintGenerated: false
-        })
-        handleGenerateBlueprint()
-      }
-    }
+    onPositiveClick: () => { runPipeline(type, true) }
   })
 }
 </script>
@@ -274,6 +238,13 @@ async function confirmRegenerate(type) {
       </div>
     </div>
 
+    <div v-for="[kind, run] in savedRuns" :key="kind" class="mb-4 p-4 rounded-xl border border-amber-200 dark:border-amber-800">
+      <p class="text-sm mb-2">{{ generationRunLabel(kind, run) }} · {{ isGenerating ? '生成进度会自动保存' : '可从已保存步骤继续' }}</p>
+      <p v-if="run.inputRevision !== generationInputRevision(project, kind)" class="text-sm text-amber-600 mb-2">生成条件已变化，继续时将按新条件重新开始。</p>
+      <n-button v-if="!isGenerating" @click="runPipeline(kind)" secondary>继续生成{{ kind === 'architecture' ? '架构' : '大纲' }}</n-button>
+    </div>
+    <n-button v-if="pipelineTask" @click="cancelPipeline" class="mb-4" secondary>停止生成并保留进度</n-button>
+
     <!-- Tabs -->
     <n-tabs v-model:value="activeTab" type="segment" animated class="novel-tabs">
       <!-- Architecture tab -->
@@ -315,6 +286,7 @@ async function confirmRegenerate(type) {
           :architecture-generated="project.architectureGenerated"
           @generate="handleGenerateBlueprint"
           @regenerate="confirmRegenerate('blueprint')"
+          @confirm-existing="handleConfirmBlueprint"
         />
       </n-tab-pane>
 

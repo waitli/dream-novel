@@ -2,6 +2,7 @@
 import { ref, computed, shallowRef, watch, onBeforeUnmount } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { readChapterDraft, writeChapterDraft, removeChapterDraft } from '../utils/chapter-drafts.js'
+import { memoryContextBefore, memoryRebuildStart, emptyMemoryLedger, assertMemorySourceUnchanged } from '../utils/chapter-memory.js'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
@@ -287,13 +288,7 @@ async function handleGenerate() {
   const task = startTask()
   if (!task) return
   try {
-    if (task.chapterNumber > 1 && getChapterStatus(task.chapterNumber - 1) !== 'finalized') {
-      const confirmed = await confirmAction({
-        title: t('common.tip'), content: `第 ${task.chapterNumber - 1} 章尚未定稿，记忆可能未更新。是否继续生成？`,
-        positiveText: t('chapterWriter.continueGenerate'), negativeText: t('common.cancel')
-      })
-      if (!confirmed || !isCurrentTask(task)) return
-    }
+    memoryContextBefore(task.project, task.chapterNumber)
     const draft = await generateChapterDraft(task.project, task.chapterNumber, taskConfig('chapter', task),
       step => { if (isCurrentTask(task)) generationStep.value = step },
       (chunk, fullContent) => { if (isCurrentTask(task)) chapterContent.value = fullContent })
@@ -316,6 +311,7 @@ async function handleSaveAndFinalize() {
     // Persist text first. Memory failures must never discard the chapter.
     saveTaskContent(task, 'needs_refinalize', { memoryError: null })
     contentSaved = true
+    memoryContextBefore(task.project, task.chapterNumber)
     generationStep.value = '正文已保存，正在进行定稿前一致性检查...'
     let consistencyReport = null
     try {
@@ -336,6 +332,7 @@ async function handleSaveAndFinalize() {
     if (!isCurrentTask(task)) return
     const latest = novelStore.projects.find(p => p.id === task.projectId)
     if (!latest || latest.chapters?.[task.chapterNumber] !== task.content) throw new Error('正文已发生变化，请重新定稿')
+    assertMemorySourceUnchanged(task.project, latest, task.chapterNumber - 1)
     const now = new Date().toISOString()
     novelStore.updateProject(task.projectId, {
       ...updates,
@@ -358,6 +355,47 @@ async function handleSaveAndFinalize() {
       }
     }
     message.error((contentSaved ? '正文已保存，定稿未完成，可重试：' : '保存失败，草稿仍保留：') + error.message)
+  } finally { finishTask(task) }
+}
+
+const memoryNeedsUpdate = computed(() => currentChapter.value > 1 && memoryRebuildStart(props.project, currentChapter.value - 1) < currentChapter.value)
+const previousChapterMemory = computed(() => {
+  if (currentChapter.value <= 1) return ''
+  try { return memoryContextBefore(props.project, currentChapter.value).globalSummary } catch { return '' }
+})
+
+async function handleRebuildMemory() {
+  if (!settings.apiConfig.apiKey) { message.warning(t('messages.pleaseConfigureApiKey')); return }
+  const task = startTask()
+  if (!task) return
+  try {
+    const through = task.chapterNumber - 1
+    const start = memoryRebuildStart(task.project, through)
+    if (start > through) { message.success('前文记忆已是最新'); return }
+    for (let n = start; n <= through; n++) {
+      if (!task.project.chapters?.[n]?.trim()) throw new Error('第 ' + n + ' 章没有已保存正文，请先保存并定稿该章')
+      const draft = readChapterDraft(localStorage, task.projectId, n)
+      if (draft && draft.updatedAt >= (task.project.chapterMeta?.[n]?.updatedAt || '') && draft.content !== task.project.chapters[n]) throw new Error('第 ' + n + ' 章有未保存的草稿修改，请先保存正文')
+    }
+    const confirmed = await confirmAction({ title: '更新前文记忆', content: '将依据已保存正文，依次更新第 ' + start + '—' + through + ' 章的记忆。此操作会调用 AI；每章完成后自动保存，可停止并继续。', positiveText: '开始更新', negativeText: '取消' })
+    if (!confirmed || !isCurrentTask(task)) return
+    let working = JSON.parse(JSON.stringify(task.project))
+    if (start === 1) working.memoryLedger = emptyMemoryLedger(working)
+    for (let n = start; n <= through; n++) {
+      const updates = await finalizeChapter(working, n, working.chapters[n], taskConfig('finalize', task),
+        step => { if (isCurrentTask(task)) generationStep.value = '第 ' + n + ' / ' + through + ' 章：' + step })
+      if (!isCurrentTask(task)) return
+      const latest = novelStore.projects.find(p => p.id === task.projectId)
+      assertMemorySourceUnchanged(task.project, latest, through)
+      const now = new Date().toISOString()
+      novelStore.updateProject(task.projectId, { ...updates, chapterMeta: { ...latest.chapterMeta, [n]: {
+        ...latest.chapterMeta?.[n], status: 'finalized', finalizedAt: now, memoryUpdatedAt: now, memoryError: null
+      } } })
+      working = JSON.parse(JSON.stringify(novelStore.projects.find(p => p.id === task.projectId)))
+    }
+    message.success('前文记忆已更新，可继续创作当前章节')
+  } catch (error) {
+    if (isCurrentTask(task)) message.error('记忆更新未完成，已完成章节已保存：' + error.message)
   } finally { finishTask(task) }
 }
 
@@ -534,7 +572,7 @@ restoreChapter(nextChapterToWrite.value)
 
           <!-- Global Summary - 前文摘要 -->
           <div 
-            v-if="currentChapter > 1 && project.globalSummary" 
+            v-if="previousChapterMemory"
             class="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/10 dark:to-orange-900/10 rounded-xl p-4 border border-amber-200/50 dark:border-amber-700/30"
           >
             <div class="flex items-center gap-2 mb-2">
@@ -542,7 +580,7 @@ restoreChapter(nextChapterToWrite.value)
               <span class="text-sm font-medium text-amber-700 dark:text-amber-300">前文摘要</span>
             </div>
             <p class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">
-              {{ project.globalSummary }}
+              {{ previousChapterMemory }}
             </p>
           </div>
 
@@ -561,6 +599,10 @@ restoreChapter(nextChapterToWrite.value)
           <p v-if="currentChapterStatus === 'memory_failed'" class="text-sm text-amber-600">
             正文已保存，记忆更新尚未完成。点击“重试定稿”后再继续下一章。
           </p>
+          <div v-if="memoryNeedsUpdate" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-700 dark:text-amber-400">
+            <p class="mb-2">前文记忆尚未更新，或缺少当前章节之前的历史版本。更新后再生成、检查或定稿本章。</p>
+            <n-button :disabled="isWorking" @click="handleRebuildMemory" secondary>更新前文记忆</n-button>
+          </div>
           <!-- Action buttons - 操作按钮 -->
           <div class="flex items-center gap-2 flex-wrap">
             <n-button type="primary" :loading="isWorking" @click="handleGenerate">

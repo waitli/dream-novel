@@ -59,6 +59,7 @@ function getProgressText(key, params = {}) {
 }
 
 import { chatCompletion, cleanResponse } from './llm.js'
+import { memoryContextBefore, recordChapterMemory } from '../utils/chapter-memory.js'
 import { architecturePrompts } from '../prompts/architecture.js'
 // 使用优化版 prompts（详细大纲 + 严格遵循 + 防截断）
 import { chapterPrompts as chapterPromptsOptimized } from '../prompts/chapter-optimized.js'
@@ -96,7 +97,7 @@ function formatGenre(genre) {
  * Generate novel architecture - 生成小说架构
  * Steps: Core seed → Character dynamics → World building → Plot architecture
  */
-export async function generateArchitecture(project, apiConfig, onProgress) {
+export async function generateArchitecture(project, apiConfig, onProgress, onCheckpoint = async () => {}) {
   const results = {
     coreSeed: project.coreSeed || '',
     characterDynamics: project.characterDynamics || '',
@@ -118,6 +119,9 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
     onProgress(getProgressText('generatingCoreSeed'), 1, 5)
     const prompt = coreSeedPrompt(params)
     results.coreSeed = cleanResponse(await chatCompletion(apiConfig, prompt))
+    if (!results.coreSeed.trim()) throw new Error('架构内容为空，请重试当前步骤')
+    apiConfig.signal?.throwIfAborted()
+    await onCheckpoint({ ...results })
   }
 
   // Step 2: Character dynamics - 角色动力学
@@ -128,6 +132,9 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
       coreSeed: results.coreSeed
     })
     results.characterDynamics = cleanResponse(await chatCompletion(apiConfig, prompt))
+    if (!results.characterDynamics.trim()) throw new Error('架构内容为空，请重试当前步骤')
+    apiConfig.signal?.throwIfAborted()
+    await onCheckpoint({ ...results })
   }
 
   // Step 2.5: Character state - 角色状态
@@ -137,6 +144,9 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
       characterDynamics: results.characterDynamics
     })
     results.characterState = cleanResponse(await chatCompletion(apiConfig, prompt))
+    if (!results.characterState.trim()) throw new Error('架构内容为空，请重试当前步骤')
+    apiConfig.signal?.throwIfAborted()
+    await onCheckpoint({ ...results })
   }
 
   // Step 3: World building - 世界观
@@ -147,6 +157,9 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
       coreSeed: results.coreSeed
     })
     results.worldBuilding = cleanResponse(await chatCompletion(apiConfig, prompt))
+    if (!results.worldBuilding.trim()) throw new Error('架构内容为空，请重试当前步骤')
+    apiConfig.signal?.throwIfAborted()
+    await onCheckpoint({ ...results })
   }
 
   // Step 4: Plot architecture - 情节架构
@@ -159,6 +172,9 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
       worldBuilding: results.worldBuilding
     })
     results.plotArchitecture = cleanResponse(await chatCompletion(apiConfig, prompt))
+    if (!results.plotArchitecture.trim()) throw new Error('架构内容为空，请重试当前步骤')
+    apiConfig.signal?.throwIfAborted()
+    await onCheckpoint({ ...results })
   }
 
   onProgress('架构生成完成!', 5, 5)
@@ -169,7 +185,7 @@ export async function generateArchitecture(project, apiConfig, onProgress) {
  * Generate chapter blueprint - 生成章节大纲
  * 修复：添加章节数量验证和重试机制
  */
-export async function generateChapterBlueprint(project, apiConfig, onProgress) {
+export async function generateChapterBlueprint(project, apiConfig, onProgress, onCheckpoint = async () => {}) {
   const { numberOfChapters, userGuidance } = project
   
   // Build novel architecture text - 构建小说架构文本
@@ -237,6 +253,8 @@ ${project.plotArchitecture}
       if (validation.isValid) {
         acceptedChapters = validation.chapters
         blueprintData = mergeBlueprintChapters(blueprintData, acceptedChapters)
+        apiConfig.signal?.throwIfAborted()
+        await onCheckpoint({ chapterBlueprintData: JSON.parse(JSON.stringify(blueprintData)), chapterBlueprint: formatChapterBlueprintMarkdown(blueprintData) })
         onProgress(
           `✓ 已生成第 ${start}-${end} 章大纲 (${acceptedChapters.length}/${expectedCount})`,
           totalChapters - getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters).length,
@@ -719,6 +737,7 @@ export function getProjectBlueprintChapters(project) {
  * Generate a single chapter draft - 生成单章草稿
  */
 export async function generateChapterDraft(project, chapterNumber, apiConfig, onProgress, onStream = null) {
+  project = memoryContextBefore(project, chapterNumber)
   const chapters = getProjectBlueprintChapters(project)
   const chapterInfo = chapters.find(c => c.number === chapterNumber)
   
@@ -1150,6 +1169,8 @@ function mergeCharacterDB(currentDB, facts, chapterNumber) {
     const existingIndex = characters.findIndex(existing => existing.id === character.id || existing.name === character.name)
     if (existingIndex >= 0) {
       characters[existingIndex] = mergePlainObject(characters[existingIndex], character)
+      // Current possessions are a snapshot. An explicit empty array means none.
+      if (Array.isArray(rawCharacter.items)) characters[existingIndex].items = rawCharacter.items
     } else {
       characters.push(character)
     }
@@ -1246,14 +1267,14 @@ function mergeForeshadowingDB(currentDB, facts, chapterNumber) {
   }
 
   for (const item of foreshadowing) {
-    if (item.status !== 'resolved' && item.status !== 'expired' && chapterNumber - Number(item.plantedChapter || chapterNumber) > 35) {
-      item.status = 'expired'
-    }
+    const expected = Number(item.expectedResolution)
+    item.overdue = item.status !== 'resolved' && item.status !== 'expired' &&
+      (Number.isFinite(expected) && expected > 0 ? chapterNumber > expected : chapterNumber - Number(item.plantedChapter || chapterNumber) > 35)
   }
 
   const active = foreshadowing.filter(item => item.status !== 'resolved' && item.status !== 'expired').length
   const resolved = foreshadowing.filter(item => item.status === 'resolved').length
-  const overdue = foreshadowing.filter(item => item.status === 'expired').length
+  const overdue = foreshadowing.filter(item => item.overdue).length
 
   return {
     ...db,
@@ -1319,6 +1340,7 @@ function buildCharacterStateFromDB(characterDB, fallback = '') {
  * Check chapter consistency before finalizing - 定稿前一致性检查
  */
 export async function checkChapterConsistency(project, chapterNumber, chapterText, apiConfig) {
+  project = memoryContextBefore(project, chapterNumber)
   const chapterOutline = getProjectBlueprintChapters(project).find(chapter => chapter.number === chapterNumber)?.rawText || ''
   const previousSummary = buildCompatibilitySummary({
     chapterSummaries: project.chapterSummaries || [],
@@ -1359,7 +1381,8 @@ export async function checkChapterConsistency(project, chapterNumber, chapterTex
  */
 export async function finalizeChapter(project, chapterNumber, chapterText, apiConfig, onProgress) {
   // Work on a detached snapshot; a failed merge must not mutate stored memory.
-  project = JSON.parse(JSON.stringify(project))
+  const sourceProject = JSON.parse(JSON.stringify(project))
+  project = memoryContextBefore(sourceProject, chapterNumber)
   const throwIfCancelled = () => apiConfig.signal?.throwIfAborted()
   throwIfCancelled()
   const requireSummary = (value) => {
@@ -1590,6 +1613,7 @@ export async function finalizeChapter(project, chapterNumber, chapterText, apiCo
   }
 
   throwIfCancelled()
+  results.memoryLedger = recordChapterMemory(sourceProject, chapterNumber, chapterText, results)
   onProgress('章节定稿完成', 6, 6)
 
   return results

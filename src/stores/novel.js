@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { reconcileProjectMemory } from '../utils/chapter-memory.js'
 
 // Novel project store - 小说项目状态管理
 export const useNovelStore = defineStore('novel', () => {
@@ -70,11 +71,11 @@ export const useNovelStore = defineStore('novel', () => {
   function updateProject(id, updates) {
     const index = projects.value.findIndex(p => p.id === id)
     if (index !== -1) {
-      const nextProject = {
+      const nextProject = reconcileProjectMemory(projects.value[index], {
         ...projects.value[index],
         ...updates,
         updatedAt: new Date().toISOString()
-      }
+      }, updates)
       const nextProjects = [...projects.value]
       nextProjects[index] = nextProject
       // Publish in-memory success only after persistence succeeds.

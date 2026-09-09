@@ -50,3 +50,21 @@ test('cancelled finalization does not run a fallback request', async t => {
   assert.equal(requests, 1)
 })
 
+test('explicit empty possessions remove lost items while long-term clues stay active', async t => {
+  const original = project()
+  original.numberOfChapters = 50
+  original.chapters = Object.fromEntries(Array.from({ length: 36 }, (_, i) => [i + 1, '已有正文']))
+  original.chapterSummaries = Array.from({ length: 36 }, (_, i) => ({ chapter: i + 1, summary: '已有摘要' }))
+  original.characterDB = JSON.stringify({ characters: [{ id: 'hero', name: '主角', items: [{ name: '宝剑' }] }], relationships: [] })
+  original.foreshadowingDB = JSON.stringify({ foreshadowing: [{ id: 'clue', name: '长线谜团', status: 'planted', plantedChapter: 1 }] })
+  const updated = facts()
+  updated.chapterSummary.chapter = 37
+  updated.characters = [{ id: 'hero', name: '主角', items: [] }]
+  replies(t, [updated, '新的弧摘要'])
+  const result = await finalizeChapter(original, 37, '宝剑已交给同伴。', config, () => {})
+  assert.deepEqual(JSON.parse(result.characterDB).characters[0].items, [])
+  const clue = JSON.parse(result.foreshadowingDB).foreshadowing[0]
+  assert.equal(clue.status, 'planted')
+  assert.equal(clue.overdue, true)
+  assert.equal(JSON.parse(result.foreshadowingDB).statistics.active, 1)
+})

@@ -34,6 +34,7 @@ const hasContent = computed(() => {
 
 // Update section content
 function updateContent(key, value) {
+  if (props.isGenerating) return
   novelStore.updateProject(props.project.id, { [key]: value })
 }
 </script>
@@ -116,6 +117,7 @@ function updateContent(key, value) {
           <div class="pt-3 pb-1">
             <n-input
               type="textarea"
+              :readonly="isGenerating"
               :value="project[section.key]"
               @update:value="updateContent(section.key, $event)"
               :autosize="{ minRows: 6, maxRows: 20 }"

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ref, computed, shallowRef, watch, reactive, effectScope } from 'vue'
 import { readChapterDraft, writeChapterDraft, removeChapterDraft } from '../src/utils/chapter-drafts.js'
+import { memoryContextBefore, memoryRebuildStart, emptyMemoryLedger, assertMemorySourceUnchanged, reconcileProjectMemory, recordChapterMemory } from '../src/utils/chapter-memory.js'
 const source = readFileSync(new URL('../src/components/ChapterWriterPanel.vue', import.meta.url), 'utf8')
   .split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
 function harness(t, overrides = {}) {
@@ -17,7 +18,7 @@ function harness(t, overrides = {}) {
     get projects() { return [props.project] },
     updateProject(id, updates) {
       assert.equal(id, props.project.id)
-      const next = { ...props.project, ...updates }
+      const next = reconcileProjectMemory(props.project, { ...props.project, ...updates }, updates)
       storage.setItem('novel_projects', JSON.stringify([next]))
       props.project = next
     }
@@ -31,16 +32,20 @@ function harness(t, overrides = {}) {
     useDialog: () => ({ warning: options => { options.onPositiveClick() } }),
     getProjectBlueprintChapters: project => project.chapterBlueprintData,
     generateChapterDraft: async () => '新正文', enrichChapter: async text => text + '扩写',
-    finalizeChapter: async () => ({ chapterSummaries: [{ chapter: 1, summary: '摘要' }] }),
+    finalizeChapter: async (project, n, text) => {
+      const result = { ...memoryContextBefore(project, n), chapterSummaries: [...memoryContextBefore(project, n).chapterSummaries, { chapter: n, summary: '摘要' }] }
+      return { chapterSummaries: result.chapterSummaries, memoryLedger: recordChapterMemory(project, n, text, result) }
+    },
     checkChapterConsistency: async () => ({ passed: true, recommendedAction: 'finalize', issues: [] }),
     generateChapterGraph: async () => ({ nodes: [], edges: [] }),
     readChapterDraft, writeChapterDraft, removeChapterDraft,
+    memoryContextBefore, memoryRebuildStart, emptyMemoryLedger, assertMemorySourceUnchanged,
     localStorage: storage, window: { addEventListener: (key, fn) => listeners.set(key, fn), removeEventListener: key => listeners.delete(key) },
     onBeforeUnmount: fn => cleanup.push(fn), onBeforeRouteLeave: fn => { leave = fn },
     ...overrides
   }
   const scope = effectScope()
-  const api = scope.run(() => new Function(...Object.keys(env), source + '\nreturn { currentChapter, chapterContent, isWorking, draftError, flushDraft, loadChapter, handleGenerate, handleQuickSave, handleSaveAndFinalize, cancelTask };')(...Object.values(env)))
+  const api = scope.run(() => new Function(...Object.keys(env), source + '\nreturn { currentChapter, chapterContent, isWorking, draftError, flushDraft, loadChapter, handleGenerate, handleQuickSave, handleSaveAndFinalize, handleRebuildMemory, memoryNeedsUpdate, cancelTask };')(...Object.values(env)))
   t.after(() => { for (const fn of cleanup) fn(); scope.stop() })
   return { ...api, props, storage, notices, listeners, leave: () => leave() }
 }
@@ -126,3 +131,48 @@ test('beforeunload flushes pending text', t => {
   assert.equal(readChapterDraft(h.storage, 'test-project', 1).content, '刷新之前')
 })
 
+test('missing prior memory blocks generation before any AI request', async t => {
+  let calls = 0
+  const h = harness(t, { generateChapterDraft: async () => { calls++; return '不应生成' } })
+  h.loadChapter(2)
+  await h.handleGenerate()
+  assert.equal(calls, 0)
+  assert.ok(h.memoryNeedsUpdate.value)
+  assert.ok(h.notices.some(n => n.text.includes('更新前文记忆')))
+})
+
+test('memory rebuild saves each completed chapter and resumes after a later failure', async t => {
+  let failSecond = true
+  const calls = []
+  const h = harness(t, { finalizeChapter: async (p, n, text) => {
+    calls.push(n)
+    if (n === 2 && failSecond) throw new Error('模拟断网')
+    const state = memoryContextBefore(p, n)
+    const result = { ...state, chapterSummaries: [...state.chapterSummaries, { chapter: n, summary: '摘要' }] }
+    return { chapterSummaries: result.chapterSummaries, memoryLedger: recordChapterMemory(p, n, text, result) }
+  } })
+  h.props.project.numberOfChapters = 3
+  h.props.project.chapterBlueprintData.push({ number: 3, title: '三' })
+  h.loadChapter(3)
+  await h.handleRebuildMemory()
+  assert.equal(h.props.project.memoryLedger.validThrough, 1)
+  assert.equal(h.props.project.chapterMeta[1].status, 'finalized')
+  assert.equal(h.currentChapter.value, 3)
+  failSecond = false
+  await h.handleRebuildMemory()
+  assert.deepEqual(calls, [1, 2, 2])
+  assert.equal(h.props.project.memoryLedger.validThrough, 2)
+  assert.equal(h.memoryNeedsUpdate.value, false)
+  assert.equal(h.props.project.chapters[1], '旧第一章')
+  assert.equal(h.props.project.chapters[2], '旧第二章')
+})
+
+test('memory rebuild refuses to ignore a newer unsaved prior draft', async t => {
+  let calls = 0
+  const h = harness(t, { finalizeChapter: async () => { calls++; throw new Error('unexpected') } })
+  h.chapterContent.value = '第一章尚未保存的修改'
+  h.loadChapter(2)
+  await h.handleRebuildMemory()
+  assert.equal(calls, 0)
+  assert.ok(h.notices.some(n => n.text.includes('未保存的草稿')))
+})

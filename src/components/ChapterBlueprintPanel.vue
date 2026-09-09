@@ -12,7 +12,7 @@ const props = defineProps({
   architectureGenerated: Boolean
 })
 
-const emit = defineEmits(['generate', 'regenerate'])
+const emit = defineEmits(['generate', 'regenerate', 'confirm-existing'])
 const { t } = useI18n()
 
 // View mode
@@ -91,6 +91,10 @@ const displayBlueprint = computed(() => {
 
     <!-- Content area -->
     <template v-else>
+      <div v-if="!project.blueprintGenerated" class="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-700 dark:text-amber-400">
+        <p class="mb-2">请检查当前大纲是否适用于最新架构，再确认沿用或重新生成。</p>
+        <n-button :disabled="isGenerating" @click="emit('confirm-existing')" secondary>确认沿用当前大纲</n-button>
+      </div>
       <!-- Toolbar -->
       <div class="flex items-center justify-between gap-4 flex-wrap bg-white dark:bg-[#1f1f23] rounded-xl p-4 border border-gray-200/80 dark:border-gray-700/50">
         <div class="flex items-center gap-3">

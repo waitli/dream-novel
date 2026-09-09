@@ -160,6 +160,7 @@ ${params.currentWorldDB || '{"entries": []}'}
 ---
 
 请只输出 JSON，不要解释。输出的是“本章事实增量”，不是完整数据库。
+角色的 items 是例外：若本章物品有变化，请给出该角色在本章结束时仍持有的完整物品列表，丢失或转交的物品必须移除；已无物品则输出 []。物品未变时省略 items，不能用空数组表示未提及。
 
 \`\`\`json
 {
@@ -677,6 +678,8 @@ export const assembleChapterContext = (params) => {
   // 限制最近摘要的数量和长度
   const recentCount = params.recentCount || 20;
   const recentSummariesText = (params.recentSummaries || [])
+    .filter(s => Number(s.chapter) < Number(params.chapterNumber))
+    .sort((a, b) => Number(a.chapter) - Number(b.chapter))
     .slice(-recentCount) // 默认取最近 20 章
     .map(s => `第${s.chapter}章「${s.title}」：${s.summary}`)
     .join('\n');
