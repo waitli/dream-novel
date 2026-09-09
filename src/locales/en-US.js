@@ -284,7 +284,7 @@ export default {
     pleaseGenerateArchitecture: 'Please Generate Architecture First',
     requirement: 'Chapter blueprint generation requires the novel architecture (core seed, character system, world-building, plot architecture)',
     generateTitle: 'Generate Chapter Blueprint',
-    description: 'AI will generate detailed outlines for {chapters} chapters based on the novel architecture, including suspense rhythm curves',
+    description: 'AI will generate outlines for {chapters} chapters one at a time. Progress is saved after each chapter, so you can resume if interrupted.',
     startGenerate: 'Start Generating Blueprint',
     cardView: 'Card View',
     rawText: 'Raw Text',

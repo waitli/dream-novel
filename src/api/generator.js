@@ -15,7 +15,7 @@ const progressTexts = {
     generatingWorldBuilding: '正在构建世界观...',
     generatingPlotArchitecture: '正在设计情节架构...',
     generatingChapterBlueprint: '正在生成章节大纲...',
-    generatingChapterBlueprintChunk: '正在生成章节大纲',
+    generatingChapterBlueprintChapter: '正在生成第 {chapter} 章大纲',
     generatingChapterDraft: '正在生成第 {chapter} 章草稿...',
     enrichingChapter: '正在扩写第 {chapter} 章...',
     finalizingChapter: '正在定稿第 {chapter} 章...',
@@ -35,7 +35,7 @@ const progressTexts = {
     generatingWorldBuilding: 'Building world...',
     generatingPlotArchitecture: 'Designing plot architecture...',
     generatingChapterBlueprint: 'Generating chapter blueprint...',
-    generatingChapterBlueprintChunk: 'Generating chapter blueprint',
+    generatingChapterBlueprintChapter: 'Generating blueprint for chapter {chapter}',
     generatingChapterDraft: 'Generating chapter {chapter} draft...',
     enrichingChapter: 'Enriching chapter {chapter}...',
     finalizingChapter: 'Finalizing chapter {chapter}...',
@@ -76,14 +76,11 @@ const { coreSeed: coreSeedPrompt, characterDynamics: characterDynamicsPrompt, wo
 // 使用 v3 三层记忆架构 prompts
 const chapterPromptsToUse = chapterPromptsOptimized
 
-const { blueprintChunked: chunkedChapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
+const { blueprintChapter: chapterBlueprintPrompt, firstDraft: firstChapterDraftPrompt, nextDraft: nextChapterDraftPrompt, enrich: enrichChapterPrompt } = chapterPromptsToUse
 
 const DEFAULT_ARC_SIZE = 10
 const GLOBAL_SUMMARY_TOKEN_LIMIT = 4500
 const BLUEPRINT_RETRY_LIMIT = 3
-const BLUEPRINT_MIN_CHUNK_SIZE = 3
-const BLUEPRINT_SAFE_CHUNK_SIZE = 8
-const BLUEPRINT_LARGE_OUTPUT_CHUNK_SIZE = 15
 
 function formatGenre(genre) {
   if (Array.isArray(genre)) return genre.join(' / ')
@@ -183,7 +180,7 @@ export async function generateArchitecture(project, apiConfig, onProgress, onChe
 
 /**
  * Generate chapter blueprint - 生成章节大纲
- * 修复：添加章节数量验证和重试机制
+ * 按章节顺序生成，每章验证并持久化后再继续下一章
  */
 export async function generateChapterBlueprint(project, apiConfig, onProgress, onCheckpoint = async () => {}) {
   const { numberOfChapters, userGuidance } = project
@@ -211,43 +208,40 @@ ${project.plotArchitecture}
     throw new Error('章节数量无效，无法生成章节大纲')
   }
 
-  const chunkSize = getBlueprintChunkSize(apiConfig, totalChapters)
   let blueprintData = filterBlueprintChaptersInRange(getProjectBlueprintChapters(project), totalChapters)
   let missingChapters = getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters)
-  const ranges = createBlueprintGenerationRanges(missingChapters, chunkSize)
 
-  if (ranges.length === 0) {
+  if (missingChapters.length === 0) {
     onProgress('章节大纲已完整，无需补充生成', totalChapters, totalChapters)
   }
 
-  for (const range of ranges) {
-    const { start, end } = range
-    const expectedCount = end - start + 1
+  for (const chapterNumber of missingChapters) {
+    const expectedCount = 1
     let acceptedChapters = []
     let lastValidation = null
 
     for (let attempt = 1; attempt <= BLUEPRINT_RETRY_LIMIT; attempt++) {
+      apiConfig.signal?.throwIfAborted()
       const progressCurrent = totalChapters - getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters).length
       const retryLabel = attempt > 1 ? `，第 ${attempt}/${BLUEPRINT_RETRY_LIMIT} 次重试` : ''
       onProgress(
-        getProgressText('generatingChapterBlueprintChunk') + ` (${start}-${end})${retryLabel}...`,
+        getProgressText('generatingChapterBlueprintChapter', { chapter: chapterNumber }) + `${retryLabel}...`,
         progressCurrent,
         totalChapters
       )
 
       const limitedBlueprint = limitChapterBlueprintData(blueprintData, 100)
-      const prompt = chunkedChapterBlueprintPrompt({
+      const prompt = chapterBlueprintPrompt({
         userGuidance,
         novelArchitecture,
         numberOfChapters: totalChapters,
         chapterList: limitedBlueprint,
-        startChapter: start,
-        endChapter: end
+        chapterNumber
       })
 
-      const chunkResult = cleanResponse(await chatCompletion(apiConfig, prompt))
-      const chunkChapters = parseChapterBlueprint(chunkResult)
-      const validation = validateBlueprintChunk(chunkChapters, start, end)
+      const chapterResult = cleanResponse(await chatCompletion(apiConfig, prompt))
+      const returnedChapters = parseChapterBlueprint(chapterResult)
+      const validation = validateBlueprintChunk(returnedChapters, chapterNumber, chapterNumber)
       lastValidation = validation
 
       if (validation.isValid) {
@@ -256,14 +250,14 @@ ${project.plotArchitecture}
         apiConfig.signal?.throwIfAborted()
         await onCheckpoint({ chapterBlueprintData: JSON.parse(JSON.stringify(blueprintData)), chapterBlueprint: formatChapterBlueprintMarkdown(blueprintData) })
         onProgress(
-          `✓ 已生成第 ${start}-${end} 章大纲 (${acceptedChapters.length}/${expectedCount})`,
+          `✓ 已保存第 ${chapterNumber} 章大纲`,
           totalChapters - getMissingOrIncompleteBlueprintChapters(blueprintData, totalChapters).length,
           totalChapters
         )
         break
       }
 
-      console.warn(`第${start}-${end}章大纲生成不完整：`, validation)
+      console.warn(`第${chapterNumber}章大纲生成不完整：`, validation)
       onProgress(
         getProgressText('generationIncomplete', { actual: validation.validCount, expected: expectedCount }),
         progressCurrent,
@@ -272,7 +266,7 @@ ${project.plotArchitecture}
     }
 
     if (acceptedChapters.length === 0) {
-      throw new Error(createBlueprintChunkErrorMessage(start, end, lastValidation))
+      throw new Error(createBlueprintChapterErrorMessage(chapterNumber, lastValidation))
     }
   }
 
@@ -292,24 +286,6 @@ ${project.plotArchitecture}
     chapterBlueprintData: blueprintData,
     chapterBlueprint: formatChapterBlueprintMarkdown(blueprintData)
   }
-}
-
-/**
- * Limit chapter blueprint to recent chapters - 限制章节大纲到最近章节
- */
-function getBlueprintChunkSize(apiConfig, totalChapters) {
-  const maxTokens = Number.parseInt(apiConfig?.maxTokens, 10) || 8192
-  const estimatedTokensPerChapter = 1200
-  const tokenBasedSize = Math.floor(maxTokens / estimatedTokensPerChapter)
-  const maxChunkSize = maxTokens >= 32000 ? BLUEPRINT_LARGE_OUTPUT_CHUNK_SIZE : BLUEPRINT_SAFE_CHUNK_SIZE
-  return Math.max(
-    1,
-    Math.min(
-      totalChapters,
-      maxChunkSize,
-      Math.max(BLUEPRINT_MIN_CHUNK_SIZE, tokenBasedSize || BLUEPRINT_MIN_CHUNK_SIZE)
-    )
-  )
 }
 
 function filterBlueprintChaptersInRange(chapters, totalChapters) {
@@ -333,29 +309,6 @@ function getMissingOrIncompleteBlueprintChapters(chapters, totalChapters) {
   }
 
   return missing
-}
-
-function createBlueprintGenerationRanges(chapterNumbers, chunkSize) {
-  const numbers = [...new Set(chapterNumbers)].sort((a, b) => a - b)
-  const ranges = []
-  let index = 0
-
-  while (index < numbers.length) {
-    const start = numbers[index]
-    let end = start
-    let count = 1
-    index++
-
-    while (index < numbers.length && numbers[index] === end + 1 && count < chunkSize) {
-      end = numbers[index]
-      count++
-      index++
-    }
-
-    ranges.push({ start, end })
-  }
-
-  return ranges
 }
 
 function validateBlueprintChunk(chapters, startChapter, endChapter) {
@@ -431,9 +384,9 @@ function formatChapterRanges(chapterNumbers, limit = 40) {
   return `${ranges.join('、')}${suffix}`
 }
 
-function createBlueprintChunkErrorMessage(startChapter, endChapter, validation) {
+function createBlueprintChapterErrorMessage(chapterNumber, validation) {
   if (!validation) {
-    return `第 ${startChapter}-${endChapter} 章大纲生成失败：模型未返回可解析内容`
+    return `第 ${chapterNumber} 章大纲生成失败：模型未返回可解析内容`
   }
 
   const details = []
@@ -450,7 +403,7 @@ function createBlueprintChunkErrorMessage(startChapter, endChapter, validation) 
     details.push(`编号重复 ${formatChapterRanges(validation.duplicateNumbers)}`)
   }
 
-  return `第 ${startChapter}-${endChapter} 章大纲生成失败：${details.join('；') || '返回结构不完整'}`
+  return `第 ${chapterNumber} 章大纲生成失败：${details.join('；') || '返回结构不完整'}`
 }
 
 function limitChapterBlueprint(blueprint, limit) {

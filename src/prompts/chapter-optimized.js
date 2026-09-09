@@ -22,7 +22,7 @@ function isEnglish() {
  * 
  * 文件来源：https://github.com/waitli/dream-novel/blob/main/src/prompts/chapter-optimized.js
  * 修改时间：2026-03-22
- * 修改内容：降低大纲详细度要求，长篇按小批次输出结构化 JSON
+ * 修改内容：降低大纲详细度要求，按单章输出结构化 JSON
  */
 
 /**
@@ -156,9 +156,9 @@ ${params.novelArchitecture}
 }
 
 /**
- * Chunked chapter blueprint prompt
+ * Single chapter blueprint prompt
  */
-export const blueprintChunked = (params) => {
+export const blueprintChapter = (params) => {
   if (isEnglish()) {
     return `
 Based on the following elements:
@@ -166,12 +166,12 @@ Based on the following elements:
 - Novel Architecture:
 ${params.novelArchitecture}
 
-Need to generate rhythm distribution for a total of ${params.numberOfChapters} chapters.
+The novel has ${params.numberOfChapters} chapters in total. This request generates only one chapter outline.
 
 Existing chapter list (if empty, this is initial generation):
 ${params.chapterList || '(None)'}
 
-Now please design the rhythm distribution for chapters ${params.startChapter} to ${params.endChapter}:
+Design only the outline for chapter ${params.chapterNumber}, continuing the existing story and respecting the overall pacing:
 
 ## Output JSON schema
 
@@ -180,7 +180,7 @@ Return a single valid JSON object:
 {
   "chapters": [
     {
-      "number": ${params.startChapter},
+      "number": ${params.chapterNumber},
       "title": "Chapter title",
       "position": "Chapter position",
       "purpose": "Core role",
@@ -211,10 +211,10 @@ Return a single valid JSON object:
 2. Mark expected recovery chapter for foreshadowing
 3. Character changes should be specific
 4. Strictly follow novel architecture
-5. Must generate complete chapters from ${params.startChapter} to ${params.endChapter}
-6. JSON must include exactly ${params.endChapter - params.startChapter + 1} chapter objects, numbered ${params.startChapter} to ${params.endChapter}
+5. Generate only chapter ${params.chapterNumber}; do not regenerate existing chapters or include future chapters.
+6. The chapters array must contain exactly one complete object with number ${params.chapterNumber}.
 
-**Now generate chapters ${params.startChapter} to ${params.endChapter}.**
+**Now generate only chapter ${params.chapterNumber}.**
 
 Return only valid JSON. Do not wrap it in markdown fences. Do not explain anything.
 `
@@ -226,12 +226,12 @@ Return only valid JSON. Do not wrap it in markdown fences. Do not explain anythi
 - 小说架构：
 ${params.novelArchitecture}
 
-需要生成总共${params.numberOfChapters}章的节奏分布，
+全书共${params.numberOfChapters}章，本次只生成其中一章的大纲。
 
 当前已有章节目录（若为空则说明是初始生成）：
 ${params.chapterList || '(无)'}
 
-现在请设计第${params.startChapter}章到第${params.endChapter}章的节奏分布：
+现在只设计第${params.chapterNumber}章的大纲，承接已有情节并遵循全书节奏：
 
 ## 输出 JSON 结构
 
@@ -240,7 +240,7 @@ ${params.chapterList || '(无)'}
 {
   "chapters": [
     {
-      "number": ${params.startChapter},
+      "number": ${params.chapterNumber},
       "title": "章节标题",
       "position": "本章定位",
       "purpose": "核心作用",
@@ -269,10 +269,10 @@ ${params.chapterList || '(无)'}
 **注意保持与已有章节的连贯性，伏笔前后一致。**
 
 ## 重要要求
-1. **必须生成第${params.startChapter}章到第${params.endChapter}章，共${params.endChapter - params.startChapter + 1}章，不能遗漏**
-2. 每章都要有标题和本章简述
-3. 如果内容过长，也要确保所有章节都生成完整
-4. JSON 必须只包含第${params.startChapter}章到第${params.endChapter}章，number 不能错位
+1. **只生成第${params.chapterNumber}章，chapters 数组必须且只能包含一个完整章节对象**
+2. 必须提供标题和本章简述，并填写上述大纲字段
+3. 不要重复生成已有章节，也不要提前输出后续章节
+4. number 必须为 ${params.chapterNumber}，保持伏笔和角色变化与已有大纲连贯
 
 仅返回合法 JSON，不要使用 markdown 代码块，不要解释任何内容。
 `
@@ -434,8 +434,9 @@ ${params.chapterText}
  */
 export const chapterPrompts = {
   blueprint,
-  blueprintChunked,
+  blueprintChapter,
   firstDraft,
   nextDraft,
   enrich
 }
+

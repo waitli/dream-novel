@@ -47,18 +47,82 @@ test('architecture checkpoints survive failure and reload without replacing acti
   assert.equal(h.project.chapterBlueprint, '原大纲')
   assert.equal(h.project.generationRuns.architecture, undefined)
 })
-test('blueprint accepts whole validated batches and resumes missing chapters only', async t => {
-  const h = fixture(), values = [chapters(1, 3), { chapters: [] }, { chapters: [] }, { chapters: [] }]
+test('blueprint saves one chapter per request and resumes the failed chapter after reload', async t => {
+  const h = fixture(), values = [chapters(1, 1), chapters(2, 2), chapters(3, 3), { chapters: [] }, { chapters: [] }, { chapters: [] }]
   const requests = replies(t, values)
-  await assert.rejects(runGenerationPipeline(h.project, 'blueprint', { ...h, config, restart: true }), /4-6/)
+  const saved = []
+  const save = (id, updates) => {
+    h.save(id, updates)
+    const run = updates.generationRuns?.blueprint
+    if (run?.status === 'running') saved.push(run.values.chapterBlueprintData.length)
+  }
+  const largeConfig = { ...config, maxTokens: 64000 }
+  await assert.rejects(runGenerationPipeline(h.project, 'blueprint', { ...h, save, config: largeConfig, restart: true }), /第 4 章/)
+  assert.deepEqual(saved, [0, 1, 2, 3])
   assert.equal(h.project.chapterBlueprint, '原大纲')
   assert.deepEqual(h.project.generationRuns.blueprint.values.chapterBlueprintData.map(c => c.number), [1, 2, 3])
   h.reload()
-  values.push(chapters(4, 6))
-  await runGenerationPipeline(h.project, 'blueprint', { ...h, config })
-  assert.equal(requests.length, 5)
+  values.push(chapters(4, 4), chapters(5, 5), chapters(6, 6))
+  await runGenerationPipeline(h.project, 'blueprint', { ...h, config: largeConfig })
+  assert.equal(requests.length, 9)
+  const prompts = requests.map(r => r.messages.at(-1).content)
+  assert.deepEqual(prompts.map(p => Number(p.match(/现在只设计第(\d+)章/)[1])), [1, 2, 3, 4, 4, 4, 4, 5, 6])
+  assert.ok(prompts.every(p => p.includes('必须且只能包含一个完整章节对象')))
+  assert.match(prompts[1], /有效情节1/)
   assert.equal(h.project.chapterBlueprintData.length, 6)
   assert.equal(h.project.generationRuns.blueprint, undefined)
+})
+
+test('blueprint fills isolated missing chapters without regenerating complete chapters', async t => {
+  const h = fixture()
+  h.save('p', { chapterBlueprint: '', chapterBlueprintData: [
+    ...chapters(1, 1).chapters, ...chapters(3, 3).chapters, ...chapters(5, 6).chapters
+  ] })
+  const requests = replies(t, [chapters(2, 2), chapters(4, 4)])
+  await runGenerationPipeline(h.project, 'blueprint', { ...h, config })
+  assert.deepEqual(requests.map(r => Number(r.messages.at(-1).content.match(/现在只设计第(\d+)章/)[1])), [2, 4])
+  assert.deepEqual(h.project.chapterBlueprintData.map(c => c.number), [1, 2, 3, 4, 5, 6])
+})
+
+test('blueprint rejects extra or duplicate chapters and retries only the current chapter', async t => {
+  const h = fixture()
+  h.save('p', { numberOfChapters: 1 })
+  const requests = replies(t, [chapters(1, 2), { chapters: [...chapters(1, 1).chapters, ...chapters(1, 1).chapters] }, chapters(1, 1)])
+  await runGenerationPipeline(h.project, 'blueprint', { ...h, config, restart: true })
+  assert.equal(requests.length, 3)
+  assert.ok(requests.every(r => r.messages.at(-1).content.includes('现在只设计第1章')))
+  assert.deepEqual(h.project.chapterBlueprintData.map(c => c.number), [1])
+})
+
+test('blueprint waits for each chapter checkpoint before making the next request', async t => {
+  const h = fixture(), requests = replies(t, [chapters(1, 1), chapters(2, 2)])
+  await assert.rejects(runGenerationPipeline(h.project, 'blueprint', { ...h, config, restart: true,
+    save: async (id, updates) => {
+      if (updates.generationRuns?.blueprint?.values.chapterBlueprintData.length === 1) {
+        await Promise.resolve()
+        throw new Error('存储空间不足')
+      }
+      h.save(id, updates)
+    }
+  }), /存储空间不足/)
+  assert.equal(requests.length, 1)
+  assert.equal(h.project.generationRuns.blueprint.values.chapterBlueprintData.length, 0)
+})
+
+test('cancelling after a saved outline prevents the next chapter request and permits resuming', async t => {
+  const h = fixture(), controller = new AbortController()
+  const values = [chapters(1, 1)], requests = replies(t, values)
+  h.save('p', { numberOfChapters: 2 })
+  await assert.rejects(runGenerationPipeline(h.project, 'blueprint', { ...h, config: { ...config, signal: controller.signal }, restart: true,
+    onProgress: text => { if (text.includes('已保存第 1 章')) controller.abort() }
+  }), { name: 'AbortError' })
+  assert.equal(requests.length, 1)
+  assert.deepEqual(h.project.generationRuns.blueprint.values.chapterBlueprintData.map(c => c.number), [1])
+  h.reload()
+  values.push(chapters(2, 2))
+  await runGenerationPipeline(h.project, 'blueprint', { ...h, config })
+  assert.equal(requests.length, 2)
+  assert.deepEqual(h.project.chapterBlueprintData.map(c => c.number), [1, 2])
 })
 test('changed generation inputs discard the obsolete checkpoint when resuming', async t => {
   const h = fixture(), values = ['旧条件核心', new Error('断网')]

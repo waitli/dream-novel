@@ -284,7 +284,7 @@ export default {
     pleaseGenerateArchitecture: '请先生成小说架构',
     requirement: '章节大纲的生成需要基于小说架构（核心种子、角色体系、世界观、情节架构）',
     generateTitle: '生成章节大纲',
-    description: 'AI 将基于小说架构，生成 {chapters} 章的详细大纲，包含悬念节奏曲线',
+    description: 'AI 将基于小说架构，逐章生成共 {chapters} 章大纲。每章完成后自动保存进度，中断后可继续。',
     startGenerate: '开始生成大纲',
     cardView: '卡片视图',
     rawText: '原始文本',
