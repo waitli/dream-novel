@@ -185,7 +185,7 @@ async function confirmRegenerate(type) {
 </script>
 
 <template>
-  <div v-if="project" class="max-w-5xl mx-auto px-4">
+  <div v-if="project" class="project-workspace">
     <!-- Project header -->
     <div class="mb-6">
       <div class="flex items-center gap-3 mb-4">
@@ -197,12 +197,12 @@ async function confirmRegenerate(type) {
         </n-button>
       </div>
       
-      <div class="flex items-start justify-between">
+      <div class="project-title-row flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 class="text-2xl font-bold text-gray-800 dark:text-white mb-2">
+          <h1 class="project-heading text-2xl font-bold text-gray-800 dark:text-white mb-2">
             {{ project.title }}
           </h1>
-          <div class="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+          <div class="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
             <n-tag :bordered="false" round size="small">{{ genreText }}</n-tag>
             <span>{{ project.numberOfChapters }} {{ t('project.chapters') }}</span>
             <span>·</span>

@@ -132,10 +132,10 @@ function updateContent(key, value) {
 </template>
 
 <style>
-.n-collapse-item{
+.architecture-collapse .n-collapse-item{
   border: none !important;
 }
-.n-collapse-item__header{
+.architecture-collapse .n-collapse-item__header{
   padding: 4px 10px !important;
 }
 .architecture-collapse .n-collapse-item {

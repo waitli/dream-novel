@@ -110,7 +110,7 @@ async function createProject() {
     :mask-closable="false"
     preset="card"
     :title="t('createProject.title')"
-    style="width: 620px"
+    style="width: min(620px, calc(100vw - 32px)); max-height: 90dvh; overflow: auto"
     :bordered="false"
     class="!rounded-2xl"
   >
@@ -202,3 +202,4 @@ async function createProject() {
     </template>
   </n-modal>
 </template>
+

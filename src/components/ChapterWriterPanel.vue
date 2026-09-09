@@ -504,21 +504,23 @@ restoreChapter(nextChapterToWrite.value)
       </div>
 
       <!-- Chapter selector and editor - 章节选择器和编辑器 -->
-      <div class="grid grid-cols-12 gap-4">
+      <div class="writer-layout">
         <!-- Chapter list sidebar - 章节列表侧边栏 -->
-        <div class="col-span-3">
+        <div class="writer-sidebar">
           <div class="bg-white dark:bg-[#1f1f23] rounded-xl border border-gray-200/80 dark:border-gray-700/50 overflow-hidden">
             <div class="p-4 border-b border-gray-200/80 dark:border-gray-700/50">
               <h3 class="font-semibold text-gray-800 dark:text-white">章节列表</h3>
             </div>
-            <div class="max-h-[500px] overflow-y-auto">
-              <div
+            <div class="chapter-navigation">
+              <button
+                type="button"
                 v-for="ch in blueprintChapters"
                 :key="ch.number"
-                class="px-4 py-3 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                class="chapter-nav-item w-full text-left px-4 py-3 cursor-pointer border-b border-gray-100 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 :class="{ 'bg-indigo-50 dark:bg-indigo-900/20 border-l-2 !border-l-indigo-500': ch.number === currentChapter }"
                 @click="loadChapter(ch.number)"
-                :aria-disabled="isWorking"
+                :disabled="isWorking"
+                :aria-current="ch.number === currentChapter ? 'step' : undefined"
               >
                 <div class="flex items-center justify-between">
                   <span class="text-sm font-medium text-gray-800 dark:text-white truncate flex-1">
@@ -539,13 +541,13 @@ restoreChapter(nextChapterToWrite.value)
                     {{ getStatusLabel(getChapterStatus(ch.number)) }}
                   </n-tag>
                 </div>
-              </div>
+              </button>
             </div>
           </div>
         </div>
 
         <!-- Editor area - 编辑区域 -->
-        <div class="col-span-9 space-y-4">
+        <div class="writer-editor space-y-4">
           <!-- Chapter info header - 章节信息头部 -->
           <div class="bg-white dark:bg-[#1f1f23] rounded-xl p-5 border border-gray-200/80 dark:border-gray-700/50">
             <div class="flex items-center justify-between mb-3">
@@ -561,9 +563,9 @@ restoreChapter(nextChapterToWrite.value)
             
             <!-- Chapter meta info - 章节元信息 -->
             <div v-if="currentChapterInfo" class="flex flex-wrap gap-2 text-xs">
-              <n-tag size="small" :bordered="false" round>{{ currentChapterInfo.position }}</n-tag>
-              <n-tag size="small" type="success" :bordered="false" round>{{ currentChapterInfo.purpose }}</n-tag>
-              <n-tag size="small" type="warning" :bordered="false" round>{{ currentChapterInfo.suspense }}</n-tag>
+              <n-tag v-if="currentChapterInfo.position" size="small" :bordered="false" round>{{ currentChapterInfo.position }}</n-tag>
+              <n-tag v-if="currentChapterInfo.purpose" size="small" type="success" :bordered="false" round>{{ currentChapterInfo.purpose }}</n-tag>
+              <n-tag v-if="currentChapterInfo.suspense" size="small" type="warning" :bordered="false" round>{{ currentChapterInfo.suspense }}</n-tag>
             </div>
             <p v-if="currentChapterInfo?.summary" class="text-sm text-gray-600 dark:text-gray-400 mt-3 leading-relaxed">
               {{ currentChapterInfo.summary }}
@@ -655,7 +657,7 @@ restoreChapter(nextChapterToWrite.value)
             type="textarea"
             :autosize="{ minRows: 20, maxRows: 40 }"
             :placeholder="`在此编写或生成第 ${currentChapter} 章内容...`"
-            class="novel-textarea"
+            class="novel-textarea manuscript-editor"
           />
 
           <!-- Word count - 字数统计 -->

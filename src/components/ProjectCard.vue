@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue'
 import { useI18n } from '../i18n'
-import { NButton, NProgress, NTag, NIcon } from 'naive-ui'
-import { TrashOutline } from '@vicons/ionicons5'
+import { NButton, NProgress, NTag } from 'naive-ui'
+import { TrashOutline, ArrowForwardOutline } from '@vicons/ionicons5'
 
 const props = defineProps({
   project: {
@@ -63,6 +63,13 @@ const genreText = computed(() => {
   return genre || ''
 })
 
+const coverStyle = computed(() => {
+  const palettes = [['#e8dccb', '#766044'], ['#d8e2da', '#486653'], ['#e8d8d2', '#8d5c4b'], ['#dce0e6', '#54667b']]
+  const hash = [...String(props.project.id)].reduce((n, c) => n + c.charCodeAt(0), 0)
+  const [paper, ink] = palettes[hash % palettes.length]
+  return { '--book-paper': paper, '--book-ink': ink }
+})
+const savedChapters = computed(() => Object.values(props.project.chapters || {}).filter(text => text.trim()).length)
 // Calculate progress
 const progress = computed(() => {
   let completed = 0
@@ -76,79 +83,14 @@ const progress = computed(() => {
 </script>
 
 <template>
-  <div 
-    class="bg-white dark:bg-[#1f1f23] rounded-2xl border border-gray-200/80 dark:border-gray-700/50 overflow-hidden cursor-pointer group hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:shadow-indigo-500/10 hover:border-indigo-300 dark:hover:border-indigo-600/50 transition-all duration-300"
-    @click="emit('click')"
-  >
-    <!-- Gradient accent bar -->
-    <!-- <div class="h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-60 group-hover:opacity-100 transition-opacity"></div> -->
-    
-    <div class="p-5">
-      <!-- Title and actions -->
-      <div class="flex items-start justify-between mb-3">
-        <div class="flex-1 min-w-0">
-          <h3 class="text-lg font-semibold text-gray-800 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-            {{ project.title }}
-          </h3>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {{ genreText }} · {{ project.numberOfChapters }} {{ t('projectCard.chapters') }}
-          </p>
-        </div>
-        
-        <!-- Delete button -->
-        <n-button 
-          circle
-          quaternary
-          size="small"
-          class="opacity-0 group-hover:opacity-100 transition-opacity !ml-2"
-          @click.stop="emit('delete')"
-        >
-          <template #icon>
-            <n-icon class="text-gray-400 hover:text-red-500"><TrashOutline /></n-icon>
-          </template>
-        </n-button>
-      </div>
-
-      <!-- Topic preview -->
-      <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 mb-4 leading-relaxed">
-        {{ project.topic }}
-      </p>
-
-      <!-- Progress bar -->
-      <div class="mb-4">
-        <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
-          <span>{{ t('projectCard.progress') }}</span>
-          <span class="font-medium">{{ progress }}%</span>
-        </div>
-        <n-progress 
-          type="line"
-          :percentage="progress" 
-          :height="6"
-          :show-indicator="false"
-          :border-radius="4"
-          rail-color="rgba(0,0,0,0.05)"
-          :fill-border-radius="4"
-        />
-      </div>
-
-      <!-- Footer info -->
-      <div class="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700/50">
-        <n-tag :type="statusInfo.type" size="small" :bordered="false" round>
-          {{ statusInfo.text }}
-        </n-tag>
-        <span class="text-xs text-gray-400">
-          {{ t('projectCard.lastUpdated') }}: {{ formatDate(project.updatedAt) }}
-        </span>
-      </div>
+  <article class="book-card" :style="coverStyle">
+    <div class="book-cover"><span class="cover-category">{{ genreText }}</span><span class="cover-emblem" aria-hidden="true">✳</span><h3>{{ project.title }}</h3><span class="cover-bottom">DREAM NOVEL <span>故事 / STORY</span></span></div>
+    <div class="book-details"><div class="book-title-row"><h3><button class="book-open" @click="emit('click')">{{ project.title }}</button></h3><n-button quaternary circle size="small" :aria-label="t('common.delete') + ' ' + project.title" class="book-delete" @click="emit('delete')"><template #icon><TrashOutline /></template></n-button></div>
+      <p class="book-topic">{{ project.topic }}</p>
+      <div class="book-progress-label"><span>{{ t('projectCard.progress') }}</span><span>{{ progress }}%</span></div>
+      <n-progress type="line" :percentage="progress" :height="3" :show-indicator="false" :border-radius="3" />
+      <div class="book-meta"><n-tag :type="statusInfo.type" size="small" :bordered="false">{{ statusInfo.text }}</n-tag><span>{{ savedChapters }} / {{ project.numberOfChapters }} {{ t('projectCard.chapters') }}</span></div>
+      <div class="book-footer"><time :datetime="project.updatedAt">{{ formatDate(project.updatedAt) }}</time><ArrowForwardOutline aria-hidden="true" /></div>
     </div>
-  </div>
+  </article>
 </template>
-
-<style scoped>
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-</style>

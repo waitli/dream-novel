@@ -14,23 +14,13 @@ const showSettings = ref(false)
 </script>
 
 <template>
-  <header class="sticky top-0 z-50 bg-white/90 dark:bg-[#18181c]/90 backdrop-blur-xl border-b border-gray-200/60 dark:border-gray-700/60 shadow-sm">
-    <div class="container mx-auto px-6">
+  <header class="studio-header">
+    <div class="header-inner">
       <div class="flex items-center justify-between h-16">
-        <!-- Logo & Title -->
-        <div 
-          class="flex items-center gap-3 cursor-pointer group"
-          @click="router.push('/')"
-        >
-          <div class="w-10 h-10 rounded-xl  flex items-center justify-center shadow-lg shadow-indigo-500/25 group-hover:shadow-indigo-500/40 transition-all duration-300 group-hover:scale-105">
-            <img src="@/assets/logo.png" />
-          </div>
-          <div>
-            <h1 class="text-lg font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">{{ t('app.name') }}</h1>
-            <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('app.subtitle') }}</p>
-          </div>
-        </div>
-
+        <button class="brand" @click="router.push('/')" :aria-label="t('app.name')">
+          <span class="brand-mark"><PencilOutline /></span>
+          <span class="brand-name">{{ t('app.name') }}<small>DREAM NOVEL · {{ settings.locale === 'zh-CN' ? '创作书房' : 'WRITING STUDIO' }}</small></span>
+        </button>
         <!-- Actions -->
         <div class="flex items-center gap-2">
           <!-- Language toggle -->
@@ -39,7 +29,7 @@ const showSettings = ref(false)
               <n-button 
                 circle 
                 quaternary
-                @click="settings.toggleLocale"
+                :aria-label="settings.locale === 'zh-CN' ? 'Switch to English' : '切换到中文'" @click="settings.toggleLocale"
                 class="!w-10 !h-10"
               >
                 <template #icon>
@@ -56,7 +46,7 @@ const showSettings = ref(false)
               <n-button 
                 circle 
                 quaternary
-                @click="settings.toggleDark"
+                :aria-label="settings.isDark ? t('header.toggleLightMode') : t('header.toggleDarkMode')" @click="settings.toggleDark"
                 class="!w-10 !h-10"
               >
                 <template #icon>
@@ -74,7 +64,7 @@ const showSettings = ref(false)
               <n-button 
                 circle 
                 quaternary
-                @click="showSettings = true"
+                :aria-label="t('header.settings')" @click="showSettings = true"
                 class="!w-10 !h-10"
               >
                 <template #icon>
@@ -90,3 +80,4 @@ const showSettings = ref(false)
   </header>
   <SettingsDialog v-model="showSettings" />
 </template>
+
