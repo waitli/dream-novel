@@ -7,12 +7,11 @@ import { useI18n } from '../i18n'
 import { useSeo } from '../composables/useSeo'
 import { getProjectBlueprintChapters, exportNovelToText, exportNovelToMarkdown } from '../api/generator'
 import { useMessage, useDialog, NButton, NTabs, NTabPane, NCard, NProgress, NTag, NIcon } from 'naive-ui'
-import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline, CompassOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, WarningOutline, GridOutline, ListOutline, PencilOutline, DownloadOutline, DocumentTextOutline, ReloadOutline } from '@vicons/ionicons5'
 import { runGenerationPipeline, generationRunLabel, generationInputRevision } from '../utils/generation-pipeline.js'
 import ArchitecturePanel from '../components/ArchitecturePanel.vue'
 import ChapterBlueprintPanel from '../components/ChapterBlueprintPanel.vue'
 import ChapterWriterPanel from '../components/ChapterWriterPanel.vue'
-import InspirationCompass from '../components/compass/InspirationCompass.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -303,25 +302,6 @@ async function confirmRegenerate(type) {
         </template>
 
         <ChapterWriterPanel
-          :project="project"
-          :is-generating="isGenerating"
-          @update:is-generating="isGenerating = $event"
-        />
-      </n-tab-pane>
-
-      <!-- Inspiration Compass tab -->
-      <n-tab-pane name="compass">
-        <template #tab>
-          <div class="flex items-center gap-2">
-            <CompassOutline class="w-4 h-4" />
-            <span>{{ t('project.compassTab') }}</span>
-            <n-tag v-if="project.graphData?.graphGenerated" type="success" size="small" :bordered="false" round>
-              {{ t('project.generated') }}
-            </n-tag>
-          </div>
-        </template>
-
-        <InspirationCompass
           :project="project"
           :is-generating="isGenerating"
           @update:is-generating="isGenerating = $event"

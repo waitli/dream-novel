@@ -48,16 +48,6 @@ export const useNovelStore = defineStore('novel', () => {
       currentArcEnd: null,      // 当前弧结束章节
       globalArcsSummary: '',    // 跨弧极简摘要
       memoryMigrated: false,    // 旧摘要是否已迁移到 v3 结构
-      // Graph data - 关系图谱数据
-      graphData: {
-        version: 1,
-        generatedAt: null,
-        snapshots: {},
-        audit: { inconsistencies: [], lastAuditAt: null },
-        graphGenerated: false
-      },
-      // Chapter graphs - 每章独立的关系图谱 { [chapterNum]: { nodes, edges } }
-      chapterGraphs: {},
       // Generation status - 生成状态
       architectureGenerated: false,
       blueprintGenerated: false

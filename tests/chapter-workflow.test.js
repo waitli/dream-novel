@@ -37,7 +37,6 @@ function harness(t, overrides = {}) {
       return { chapterSummaries: result.chapterSummaries, memoryLedger: recordChapterMemory(project, n, text, result) }
     },
     checkChapterConsistency: async () => ({ passed: true, recommendedAction: 'finalize', issues: [] }),
-    generateChapterGraph: async () => ({ nodes: [], edges: [] }),
     readChapterDraft, writeChapterDraft, removeChapterDraft,
     memoryContextBefore, memoryRebuildStart, emptyMemoryLedger, assertMemorySourceUnchanged,
     localStorage: storage, window: { addEventListener: (key, fn) => listeners.set(key, fn), removeEventListener: key => listeners.delete(key) },
@@ -101,13 +100,21 @@ test('failed memory update keeps saved text, marks failure and does not advance'
   assert.ok(!h.notices.some(n => n.type === 'success' && n.text.includes('定稿')))
 })
 test('successful retry marks memory complete and restores the next saved chapter', async t => {
-  const h = harness(t)
+  const stages = []
+  const h = harness(t, { useSettingsStore: () => ({
+    apiConfig: { apiKey: 'test' },
+    getStageConfig: stage => { stages.push(stage); return { apiKey: 'test' } }
+  }) })
   h.props.project.chapterMeta[1] = { status: 'memory_failed' }
   await h.handleSaveAndFinalize()
   assert.equal(h.props.project.chapterMeta[1].status, 'finalized')
   assert.ok(h.props.project.chapterMeta[1].memoryUpdatedAt)
   assert.equal(h.currentChapter.value, 2)
   assert.equal(h.chapterContent.value, '旧第二章')
+  assert.deepEqual(stages, ['finalize', 'finalize'])
+  assert.equal(h.props.project.chapterMeta[1].consistencyCheck.passed, true)
+  assert.equal(h.props.project.memoryLedger.validThrough, 1)
+  assert.equal(h.isWorking.value, false)
 })
 test('navigation flushes an edit that is still waiting for the autosave timer', t => {
   const h = harness(t)

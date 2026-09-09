@@ -7,10 +7,8 @@ import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { generateChapterDraft, finalizeChapter, checkChapterConsistency, enrichChapter, getProjectBlueprintChapters } from '../api/generator'
-import { generateChapterGraph } from '../api/compass-generator'
 import { useMessage, useDialog, NButton, NInput, NProgress, NTag, NIcon, NTooltip } from 'naive-ui'
 import { WarningOutline, SparklesOutline, PencilOutline, SaveOutline, CheckmarkOutline, CheckmarkCircleOutline, ReloadOutline, HelpCircleOutline, DocumentTextOutline } from '@vicons/ionicons5'
-import ChapterRelationGraph from './compass/ChapterRelationGraph.vue'
 
 const props = defineProps({
   project: Object,
@@ -28,8 +26,6 @@ const { t } = useI18n()
 const currentChapter = ref(1)
 const chapterContent = ref('')
 const generationStep = ref('')
-const graphGenerating = ref(false)
-const graphStep = ref('')
 const activeTask = shallowRef(null)
 const isWorking = computed(() => props.isGenerating || Boolean(activeTask.value))
 const draftDirty = ref(false), draftError = ref(''), draftSavedAt = ref('')
@@ -181,11 +177,6 @@ const currentChapterStatus = computed(() => {
     return status === 'finalized' ? 'needs_refinalize' : 'draft'
   }
   return status
-})
-
-// Current chapter's relation graph data
-const currentChapterGraph = computed(() => {
-  return props.project?.chapterGraphs?.[currentChapter.value] || null
 })
 
 // Load chapter content when switching - 切换章节时加载内容
@@ -344,7 +335,6 @@ async function handleSaveAndFinalize() {
     flushDraft()
     try { removeChapterDraft(localStorage, task.projectId, task.chapterNumber) } catch { /* Saved chapter remains authoritative. */ }
     message.success(`第 ${task.chapterNumber} 章已保存并定稿`)
-    generateChapterGraphData(task.chapterNumber, task.content, task.projectId)
     if (task.chapterNumber < task.project.numberOfChapters) restoreChapter(task.chapterNumber + 1)
   } catch (error) {
     if (!isCurrentTask(task)) return
@@ -429,36 +419,6 @@ async function handleEnrich() {
   } catch (error) {
     if (isCurrentTask(task)) message.error('扩写未完成，已保留当前正文：' + error.message)
   } finally { finishTask(task) }
-}
-
-// Generate chapter relation graph - 生成章节关系图谱
-async function generateChapterGraphData(chapterNum, chapterText, projectId) {
-  const graphProject = novelStore.projects.find(p => p.id === projectId)
-  if (!graphProject) return
-  try {
-    graphGenerating.value = true
-    graphStep.value = '正在提取本章人物关系...'
-
-    const graphResult = await generateChapterGraph(
-      graphProject,
-      chapterNum,
-      chapterText,
-      settings.getStageConfig('architecture'),
-      (step) => { graphStep.value = step }
-    )
-
-    const latest = novelStore.projects.find(p => p.id === projectId)
-    if (!latest || latest.chapters?.[chapterNum] !== chapterText) return
-    const updatedChapterGraphs = { ...latest.chapterGraphs, [chapterNum]: graphResult }
-    novelStore.updateProject(projectId, { chapterGraphs: updatedChapterGraphs })
-    message.success(`第 ${chapterNum} 章关系图谱已生成`)
-  } catch (err) {
-    console.error('Chapter graph error:', err)
-    message.warning('关系图谱生成失败: ' + err.message)
-  } finally {
-    graphGenerating.value = false
-    graphStep.value = ''
-  }
 }
 
 // Initialize with next chapter to write - 初始化到下一个要写的章节
@@ -663,21 +623,6 @@ restoreChapter(nextChapterToWrite.value)
           <!-- Word count - 字数统计 -->
           <div class="text-right text-sm text-gray-500 dark:text-gray-400">
             当前字数：<span class="font-medium text-gray-700 dark:text-gray-300">{{ chapterContent.length }}</span> / 目标：{{ project.wordNumber }}
-          </div>
-
-          <!-- Chapter relation graph - 章节关系图谱 -->
-          <div v-if="graphGenerating" class="flex items-center gap-3 px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl text-sm text-indigo-600 dark:text-indigo-400">
-            <span class="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            {{ graphStep || '正在生成关系图谱...' }}
-          </div>
-          <div v-if="currentChapterGraph" class="bg-white dark:bg-[#1f1f23] rounded-xl border border-gray-200/80 dark:border-gray-700/50 overflow-hidden">
-            <div class="px-4 py-3 border-b border-gray-200/80 dark:border-gray-700/50 flex items-center justify-between">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-200">本章人物关系图谱</span>
-              <n-tag size="small" :bordered="false" round type="info">
-                {{ currentChapterGraph.nodes?.length || 0 }} 角色 · {{ currentChapterGraph.edges?.length || 0 }} 关系
-              </n-tag>
-            </div>
-            <ChapterRelationGraph :graph-data="currentChapterGraph" :height="360" />
           </div>
         </div>
       </div>

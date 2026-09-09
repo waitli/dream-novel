@@ -203,7 +203,6 @@ export default {
     architectureTab: 'Architecture',
     blueprintTab: 'Chapter Blueprint',
     chaptersTab: 'Chapters',
-    compassTab: 'Inspiration Compass',
     generated: 'Generated',
     notGenerated: 'Not Generated',
     regenerate: 'Regenerate',
@@ -306,9 +305,7 @@ export default {
     finalizeChapter: 'Finalize Chapter',
     saveChapter: 'Save Chapter',
     chapterContent: 'Chapter Content',
-    autoSaved: 'Auto-saved',
-    generateGraph: 'Generate Graph',
-    viewGraph: 'View Graph'
+    autoSaved: 'Auto-saved'
   },
 
   // Common
@@ -340,3 +337,4 @@ export default {
     pleaseConfigureApiKey: 'Please configure API Key in settings first'
   }
 }
+

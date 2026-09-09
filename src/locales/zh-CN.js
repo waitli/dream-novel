@@ -203,7 +203,6 @@ export default {
     architectureTab: '小说架构',
     blueprintTab: '章节大纲',
     chaptersTab: '章节生成',
-    compassTab: '灵感罗盘',
     generated: '已生成',
     notGenerated: '未生成',
     regenerate: '重新生成',
@@ -306,9 +305,7 @@ export default {
     finalizeChapter: '定稿章节',
     saveChapter: '保存章节',
     chapterContent: '章节内容',
-    autoSaved: '已自动保存',
-    generateGraph: '生成关系图谱',
-    viewGraph: '查看图谱'
+    autoSaved: '已自动保存'
   },
 
   // 通用提示
@@ -340,3 +337,4 @@ export default {
     pleaseConfigureApiKey: '请先在设置中配置 API Key'
   }
 }
+

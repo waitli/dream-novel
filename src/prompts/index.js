@@ -6,7 +6,6 @@
 import { architecturePrompts } from './architecture'
 import { chapterPrompts } from './chapter'
 import { utilityPrompts } from './utility'
-import { compassPrompts } from './compass'
 
 /**
  * 提示词管理器
@@ -17,8 +16,7 @@ class PromptManager {
     this.prompts = {
       architecture: architecturePrompts,
       chapter: chapterPrompts,
-      utility: utilityPrompts,
-      compass: compassPrompts
+      utility: utilityPrompts
     }
     
     // 版本号，用于追踪提示词更新
@@ -99,4 +97,4 @@ export const promptManager = new PromptManager()
 export { architecturePrompts } from './architecture'
 export { chapterPrompts } from './chapter'
 export { utilityPrompts } from './utility'
-export { compassPrompts } from './compass'
+
