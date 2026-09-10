@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+Disallow: /project/
+
+Sitemap: https://novel.waitli.top/sitemap.xml
