@@ -91,6 +91,13 @@ const channels = [
     getApiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
   },
   {
+    id: 'sensenova',
+    name: 'SenseNova 商汤日日新',
+    baseUrl: 'https://api.sensenova.cn/v1',
+    models: ['nova-ptc-xl-v1', 'nova-ptc-pro-v1', 'nova-lite-v1', 'nova-turbo-v1'],
+    getApiKeyUrl: 'https://platform.sensenova.cn/console/api-key'
+  },
+  {
     id: 'custom',
     name: 'Custom API',
     baseUrl: '',
