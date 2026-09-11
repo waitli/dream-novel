@@ -4,7 +4,7 @@ import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSpace, NColla
 import { useSettingsStore } from '../stores/settings'
 import { useI18n } from '../i18n'
 import { DEFAULT_API_CONFIG, normalizeApiConfig, validateApiConfig } from '../utils/api-config.js'
-import { chatCompletion } from '../api/llm.js'
+import { testApiConnection } from '../api/llm.js'
 
 const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue'])
@@ -18,16 +18,18 @@ const copy = computed(() => settings.locale === 'en-US' ? {
   intro: 'One connection for the whole writing workflow. DeepSeek is prefilled; you can use another OpenAI-compatible endpoint.',
   legacy: 'Your existing native API configuration is preserved. Switching to a compatible endpoint requires its URL and API key.',
   switch: 'Use a compatible API', advanced: 'Advanced settings (optional)', test: 'Test connection',
-  testHint: 'Sends a short request using your selected model. Usage may be charged by your provider.',
-  passed: 'Connection successful', failed: 'Connection failed', temperature: 'Temperature', timeout: 'Timeout (seconds)',
+  testHint: 'Tests the selected model with up to 128 output tokens and your configured timeout. Writing parameters are not tested. Usage may be charged by your provider.',
+  urlHint: 'Use the provider’s API base URL, including any /v1 or /api/v1 prefix. A full /chat/completions URL is also accepted. The provider must allow browser requests (CORS).',
+  passed: 'Connection successful (writing parameters not tested)', failed: 'Connection failed', temperature: 'Temperature', timeout: 'Timeout (seconds)',
   storage: 'Settings could not be saved. Please check browser storage.',
   model: 'Enter the model ID supplied by your API provider'
 } : {
   intro: '一次配置用于全部创作环节。默认填入 DeepSeek，也可使用其他 OpenAI 兼容接口。',
   legacy: '已保留你的旧版原生接口配置。切换到兼容接口后，需要填写对应的地址和密钥。',
   switch: '切换到兼容接口', advanced: '高级设置（可选）', test: '测试连接',
-  testHint: '会使用所选模型发送一条简短请求，接口提供方可能收取用量费用。',
-  passed: '连接成功', failed: '连接失败', temperature: '创作温度', timeout: '超时（秒）',
+  testHint: '使用所选模型测试，最多输出 128 token，遵循高级设置中的超时；不验证写作参数。接口提供方可能收取用量费用。',
+  urlHint: '填写服务商提供的 API 基础地址，保留 /v1、/api/v1 等路径；也支持完整的 /chat/completions 地址。接口需允许浏览器跨域访问（CORS）。',
+  passed: '连接成功（尚未验证写作参数）', failed: '连接失败', temperature: '创作温度', timeout: '超时（秒）',
   storage: '设置保存失败，请检查浏览器存储空间。',
   model: '填写接口提供方给出的模型名称'
 })
@@ -52,7 +54,7 @@ async function testConnection() {
     const config = validateApiConfig(localConfig.value)
     testing.value = true
     testResult.value = ''
-    await chatCompletion({ ...config, timeout: 30 }, 'Reply only with OK.')
+    await testApiConnection(config)
     testResult.value = copy.value.passed
     message.success(copy.value.passed)
   } catch (error) {
@@ -89,6 +91,7 @@ function saveSettings() {
       <n-form-item v-else :label="t('settings.apiBaseUrl')">
         <n-input v-model:value="localConfig.baseUrl" placeholder="https://api.deepseek.com" />
       </n-form-item>
+      <p v-if="!legacy" class="text-xs text-gray-500 mb-4">{{ copy.urlHint }}</p>
       <n-form-item :label="t('settings.apiKey')">
         <n-input v-model:value="localConfig.apiKey" type="password" :placeholder="t('settings.apiKeyPlaceholder')" show-password-on="click" />
       </n-form-item>

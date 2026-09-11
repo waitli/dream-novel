@@ -3,9 +3,11 @@ import { validateApiConfig } from '../utils/api-config.js'
 export class LLMError extends Error {
   constructor(message, code) { super(message); this.name = 'LLMError'; this.code = code }
 }
-function buildRequest(config, prompt, stream) {
+function buildRequest(config, prompt, stream, probe = false) {
   const { channel, baseUrl, apiKey, model, temperature, maxTokens } = config
   const data = { model, messages: [{ role: 'user', content: prompt }], temperature, max_tokens: maxTokens, stream }
+  // A connectivity check should not depend on the provider's creative parameter limits.
+  if (probe) { data.max_tokens = Math.min(maxTokens, 128); delete data.temperature }
   if (channel === 'azure') {
     delete data.model
     return { url: `https://${config.resourceName}.openai.azure.com/openai/deployments/${config.deploymentId}/chat/completions?api-version=${encodeURIComponent(config.apiVersion)}`,
@@ -72,29 +74,63 @@ async function readStream(response, channel, onStream) {
   }
 }
 export async function chatCompletion(value, prompt, onStream = null) {
-  const config = validateApiConfig(value), request = buildRequest(config, prompt, Boolean(onStream))
+  return requestCompletion(value, prompt, onStream)
+}
+export async function testApiConnection(value) {
+  await requestCompletion(value, 'Reply only with OK.', null, true)
+}
+async function requestCompletion(value, prompt, onStream, probe = false) {
+  const config = validateApiConfig(value), request = buildRequest(config, prompt, Boolean(onStream), probe)
   const controller = new AbortController()
   const abort = () => controller.abort(value.signal?.reason)
   if (value.signal?.aborted) abort()
   else value.signal?.addEventListener('abort', abort, { once: true })
   const timer = setTimeout(() => controller.abort(new DOMException('请求超时', 'TimeoutError')), config.timeout * 1000)
   try {
-    const response = await fetch(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(request.data), signal: controller.signal })
+    let response
+    try {
+      response = await fetch(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(request.data), signal: controller.signal })
+    } catch (error) {
+      if (error instanceof TypeError && !controller.signal.aborted) {
+        throw new LLMError(`无法连接 AI 接口：${request.url}。可能是网络、TLS 证书或浏览器跨域（CORS）限制。本网站由浏览器直接请求接口，请确认服务商允许本站跨域访问，或使用你信任且支持跨域的兼容接口。`, 'NETWORK_ERROR')
+      }
+      throw error
+    }
     if (!response.ok) {
       let detail = ''
       try { const body = await response.json(); detail = body.error?.message || body.message || '' } catch { /* Non-JSON error page. */ }
-      throw new LLMError(`AI 请求失败（HTTP ${response.status}）${detail ? ': ' + String(detail).slice(0, 300) : ''}`, 'HTTP_ERROR')
+      const hints = {
+        400: '请检查模型支持的请求参数。', 401: '请检查 API Key 是否正确、有效。',
+        403: '请检查密钥权限或服务商的访问限制。', 404: '请检查 API 地址路径（例如 /v1）及模型名称。',
+        429: '请检查额度、余额或请求频率限制。'
+      }
+      throw new LLMError(`AI 请求失败（HTTP ${response.status}）${detail ? ': ' + String(detail).slice(0, 300) : ''} ${hints[response.status] || ''} 请求地址：${request.url}`, 'HTTP_ERROR')
     }
     if (onStream) return await readStream(response, config.channel, onStream)
     let data
-    try { data = await response.json() } catch { throw new LLMError('接口返回了无效 JSON', 'INVALID_RESPONSE') }
+    try { data = await response.json() } catch { throw new LLMError(`接口返回了无效 JSON，请确认填写的是 API 地址而非网站首页。请求地址：${request.url}`, 'INVALID_RESPONSE') }
     checkApiError(data)
+    if (!data || (config.channel === 'anthropic' ? !Array.isArray(data.content) : !data.choices?.[0]?.message)) {
+      throw new LLMError('接口响应不是所选协议的消息格式，请检查 API 地址和接口协议。', 'INVALID_RESPONSE')
+    }
     const content = config.channel === 'anthropic'
       ? data.content?.filter(block => block.type === 'text').map(block => block.text).join('')
       : data.choices?.[0]?.message?.content
-    checkFinishReason(config.channel === 'anthropic' ? data.stop_reason : data.choices?.[0]?.finish_reason)
+    const reason = config.channel === 'anthropic' ? data.stop_reason : data.choices?.[0]?.finish_reason
+    // Reasoning models may spend the entire small probe budget before producing text.
+    // This still verifies connectivity; real writing must continue to reject truncation.
+    if (probe && ['length', 'max_tokens'].includes(reason)) return content || ''
+    checkFinishReason(reason)
     if (typeof content !== 'string' || !content.trim()) throw new LLMError('模型没有返回正文，请检查模型或输出上限。', 'EMPTY_RESPONSE')
     return content
+  } catch (error) {
+    if (controller.signal.aborted) {
+      if (controller.signal.reason?.name === 'TimeoutError') {
+        throw new DOMException(`请求超时（${config.timeout} 秒），请检查网络、服务商响应速度，或在高级设置中增加超时。`, 'TimeoutError')
+      }
+      throw controller.signal.reason || error
+    }
+    throw error
   } finally {
     clearTimeout(timer)
     value.signal?.removeEventListener('abort', abort)

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chatCompletion } from '../src/api/llm.js'
+import { chatCompletion, testApiConnection } from '../src/api/llm.js'
 import { DEFAULT_API_CONFIG } from '../src/utils/api-config.js'
 const config = { ...DEFAULT_API_CONFIG, apiKey: 'test-only', timeout: 2 }
 const encoder = new TextEncoder()
@@ -69,4 +69,73 @@ test('HTTP errors report the provider message without credentials', async t => {
   t.mock.method(globalThis, 'fetch', async () => Response.json({ error: { message: 'invalid model' } }, { status: 400 }))
   await assert.rejects(chatCompletion(config, 'test'), error => error.code === 'HTTP_ERROR' && error.message.includes('invalid model') && !error.message.includes(config.apiKey))
 })
-
+test('connection probe works with providers that reject large writing limits and temperature', async t => {
+  const calls = []
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const body = JSON.parse(options.body)
+    calls.push({ url, body })
+    if (body.max_tokens > 8192 || 'temperature' in body) {
+      return Response.json({ error: { message: 'unsupported writing parameters' } }, { status: 400 })
+    }
+    return Response.json({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] })
+  })
+  const input = { ...config, baseUrl: 'https://example.com/api/v1/chat/completions/' }
+  await testApiConnection(input)
+  assert.equal(calls[0].url, 'https://example.com/api/v1/chat/completions')
+  assert.equal(calls[0].body.model, input.model)
+  assert.equal(calls[0].body.max_tokens, 128)
+  assert.equal(calls[0].body.stream, false)
+  assert.equal(input.maxTokens, 32768)
+  await assert.rejects(chatCompletion(input, 'write'), { code: 'HTTP_ERROR' })
+  assert.equal(calls[1].body.max_tokens, input.maxTokens)
+  assert.equal(calls[1].body.temperature, input.temperature)
+})
+test('a reasoning response that exhausts the probe budget verifies connectivity only', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{
+    message: { content: null, reasoning_content: 'Thinking' }, finish_reason: 'length'
+  }] }))
+  await testApiConnection(config)
+  await assert.rejects(chatCompletion(config, 'write'), { code: 'OUTPUT_TRUNCATED' })
+})
+test('native probe permits its small budget to end at max_tokens', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ content: [], stop_reason: 'max_tokens' }))
+  await testApiConnection({ ...config, channel: 'anthropic' })
+  await assert.rejects(chatCompletion({ ...config, channel: 'anthropic' }, 'write'), { code: 'OUTPUT_TRUNCATED' })
+})
+test('connection probe rejects API errors, malformed responses and empty messages', async t => {
+  for (const [data, code] of [
+    [{ error: { message: 'invalid key' } }, 'API_ERROR'],
+    [null, 'INVALID_RESPONSE'], [{ status: 'ok' }, 'INVALID_RESPONSE'],
+    [{ choices: [{ finish_reason: 'length' }] }, 'INVALID_RESPONSE'],
+    [{ choices: [{ message: { content: '' }, finish_reason: 'stop' }] }, 'EMPTY_RESPONSE']
+  ]) {
+    t.mock.method(globalThis, 'fetch', async () => Response.json(data))
+    await assert.rejects(testApiConnection(config), { code })
+  }
+})
+test('network failures explain possible CORS restrictions without claiming certainty', async t => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('Failed to fetch') })
+  await assert.rejects(testApiConnection(config), error => error.code === 'NETWORK_ERROR'
+    && error.message.includes('可能') && error.message.includes('CORS') && !error.message.includes(config.apiKey))
+})
+test('404 and HTML responses identify the actual endpoint', async t => {
+  for (const [response, code] of [
+    [new Response('Not Found', { status: 404 }), 'HTTP_ERROR'],
+    [new Response('<html>Website home</html>'), 'INVALID_RESPONSE']
+  ]) {
+    t.mock.method(globalThis, 'fetch', async () => response)
+    await assert.rejects(testApiConnection(config), error => error.code === code
+      && error.message.includes(config.baseUrl + '/chat/completions'))
+  }
+})
+test('connection probe uses configured timeout and reports it clearly', async t => {
+  let expire, delay
+  t.mock.method(globalThis, 'setTimeout', (callback, ms) => { expire = callback; delay = ms; return 123 })
+  t.mock.method(globalThis, 'clearTimeout', () => {})
+  t.mock.method(globalThis, 'fetch', async (_, options) => {
+    expire()
+    options.signal.throwIfAborted()
+  })
+  await assert.rejects(testApiConnection({ ...config, timeout: 75 }), error => error.name === 'TimeoutError' && error.message.includes('75 秒'))
+  assert.equal(delay, 75000)
+})
